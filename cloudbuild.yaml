@@ -1,0 +1,16 @@
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud functions deploy stripeToJira \
+          --runtime=nodejs20 \
+          --trigger-http \
+          --entry-point=stripeToJira \
+          --allow-unauthenticated \
+          --region=europe-west2 \
+          --set-env-vars=STRIPE_SECRET_KEY=$$(gcloud secrets versions access latest --secret=stripe-secret-key),STRIPE_WEBHOOK_SECRET=$$(gcloud secrets versions access latest --secret=stripe-webhook-secret),JIRA_EMAIL=$$(gcloud secrets versions access latest --secret=jira-email),JIRA_API_TOKEN=$$(gcloud secrets versions access latest --secret=jira-api-token),JIRA_DOMAIN=$$(gcloud secrets versions access latest --secret=jira-domain)
