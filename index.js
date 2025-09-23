@@ -52,7 +52,7 @@ exports.stripeToJira = async (req, res) => {
   };
 
   try {
-    // 1. Create Epic
+    // 1. Create TheEpic
     const epicResponse = await axios.post(`${jiraDomain}/rest/api/3/issue`, {
       fields: {
         project: { key: projectKey },
