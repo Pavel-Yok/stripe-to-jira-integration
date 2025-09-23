@@ -94,4 +94,4 @@ End Date: ${endDate}
   }
 });
 
-exports.stripeToJira = app;
+exports.stripetojira = app;
