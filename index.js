@@ -7,7 +7,7 @@ const app = express();
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
-app.post('/stripeToJira', express.raw({ type: 'application/json' }), async (req, res) => {
+app.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
