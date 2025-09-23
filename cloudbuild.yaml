@@ -7,7 +7,7 @@ steps:
     args:
       - '-c'
       - |
-        gcloud functions deploy stripeToJira \
+        gcloud functions deploy stripetojira \
           --runtime=nodejs20 \
           --trigger-http \
           --entry-point=stripeToJira \
@@ -20,7 +20,7 @@ steps:
     args:
       - '-c'
       - |
-        gcloud run services add-iam-policy-binding stripeToJira \
+        gcloud run services add-iam-policy-binding stripetojira \
           --member="allUsers" \
           --role="roles/run.invoker" \
           --region=europe-west2
