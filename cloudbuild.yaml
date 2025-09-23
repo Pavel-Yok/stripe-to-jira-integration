@@ -1,0 +1,13 @@
+steps:
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud functions deploy stripeToJira \
+          --runtime=nodejs18 \
+          --trigger-http \
+          --entry-point=stripeToJira \
+          --allow-unauthenticated \
+          --region=europe-west2 \
+          --set-env-vars=STRIPE_SECRET_KEY=${_STRIPE_SECRET_KEY},STRIPE_WEBHOOK_SECRET=${_STRIPE_WEBHOOK_SECRET},JIRA_EMAIL=${_JIRA_EMAIL},JIRA_API_TOKEN=${_JIRA_API_TOKEN},JIRA_DOMAIN=${_JIRA_DOMAIN}
