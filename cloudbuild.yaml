@@ -13,7 +13,6 @@ steps:
           --entry-point=stripeToJira \
           --allow-unauthenticated \
           --region=europe-west2 \
-          --update-service \
           --set-env-vars=STRIPE_SECRET_KEY=$$(gcloud secrets versions access latest --secret=stripe-secret-key),STRIPE_WEBHOOK_SECRET=$$(gcloud secrets versions access latest --secret=stripe-whsec-webhook-secret),JIRA_EMAIL=$$(gcloud secrets versions access latest --secret=jira-email),JIRA_API_TOKEN=$$(gcloud secrets versions access latest --secret=jira-api-token),JIRA_DOMAIN=$$(gcloud secrets versions access latest --secret=jira-domain)
         
   - name: 'gcr.io/cloud-builders/gcloud'
