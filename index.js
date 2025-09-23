@@ -1,17 +1,18 @@
-// gemini1940
+
+// gemini2025
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
-const crypto = require('crypto');
+const express = require('express');
+const app = express();
 
-exports.stripeToJira = async (req, res) => {
+const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+app.post('/stripeToJira', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
-  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
   let event;
 
   try {
-    const rawBody = req.rawBody || JSON.stringify(req.body);
-    event = stripe.webhooks.constructEvent(rawBody, sig, endpointSecret);
+    event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
   } catch (err) {
     console.error('Webhook signature verification failed.', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
@@ -20,7 +21,8 @@ exports.stripeToJira = async (req, res) => {
   if (event.type !== 'checkout.session.completed') {
     return res.status(200).send('Event ignored');
   }
-
+  
+  // ... (rest of your existing logic for Jira API calls) ...
   const session = event.data.object;
   const metadata = session.metadata || {};
   const customerDetails = session.customer_details || {};
@@ -80,7 +82,7 @@ Start Date: ${startDate}
 End Date: ${endDate}
         `,
         customfield_10015: startDate, // Start Date
-        duedate: endDate,             // Due Date
+        duedate: endDate,              // Due Date
         customfield_10014: epicKey    // Epic Link
       }
     }, {
@@ -93,4 +95,6 @@ End Date: ${endDate}
     console.error('Error creating Jira issue:', err.response?.data || err.message);
     res.status(500).send('Failed to create Jira issue');
   }
-};
+});
+
+exports.stripeToJira = app;
