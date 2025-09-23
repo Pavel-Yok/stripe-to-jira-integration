@@ -8,7 +8,7 @@ steps:
       - '-c'
       - |
         gcloud functions deploy stripeToJira \
-          --runtime=nodejs18 \
+          --runtime=nodejs20 \
           --trigger-http \
           --entry-point=stripeToJira \
           --allow-unauthenticated \
