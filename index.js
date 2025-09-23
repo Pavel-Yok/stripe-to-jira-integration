@@ -1,4 +1,4 @@
-// not-just-test
+// gemini
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
 const crypto = require('crypto');
