@@ -1,5 +1,5 @@
 
-// gemini2025
+// gemini2031
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
 const express = require('express');
@@ -21,8 +21,7 @@ app.post('/stripeToJira', express.raw({ type: 'application/json' }), async (req,
   if (event.type !== 'checkout.session.completed') {
     return res.status(200).send('Event ignored');
   }
-  
-  // ... (rest of your existing logic for Jira API calls) ...
+
   const session = event.data.object;
   const metadata = session.metadata || {};
   const customerDetails = session.customer_details || {};
