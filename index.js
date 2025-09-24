@@ -69,9 +69,8 @@ async function jiraPost(url, payload, headers, actionDesc) {
  */
 async function processCheckoutSession(session) {
 // Change this line:
-// console.log("📝 Session metadata:", session.metadata);
-// To this:
-console.log("📝 Webhook data object:", JSON.stringify(event.data, null, 2));
+console.log("📝 Session metadata:", session.metadata);
+
 
     const metadata = session.metadata || {};
     const customerDetails = session.customer_details || {};
@@ -241,10 +240,8 @@ exports.stripetojira = async (req, res) => {
 
     // Start background processing based on event type
     // And change this line to ensure you pass the right data to the function:
-    // if (event.type === 'checkout.session.completed') {
-    //    processCheckoutSession(event.data.object).catch(err => {
-    if (event.type === 'checkout.session.completed') {
-    processCheckoutSession(event.data).catch(err => {
+     if (event.type === 'checkout.session.completed') {
+      processCheckoutSession(event.data.object).catch(err => {
             // New: More detailed background error logging
             console.error(`❌ Failed to process event ${event.id}:`, err);
         });
