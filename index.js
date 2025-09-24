@@ -204,11 +204,11 @@ app.post('/', async (req, res) => {
     // Immediately respond to Stripe to prevent a timeout
     res.status(200).send('Event received');
 
-    // Process the event in the background without waiting for it to finish
+    // Process the event in the background *without* waiting for it to finish
     if (event.type === 'checkout.session.completed') {
-        processCheckoutSession(event.data.object).catch(err =>
-            console.error('❌ Background Jira workflow failed:', err)
-        );
+        processCheckoutSession(event.data.object).catch(err => {
+            console.error('❌ Background Jira workflow failed:', err.response?.data || err.message);
+        });
     }
 });
 
