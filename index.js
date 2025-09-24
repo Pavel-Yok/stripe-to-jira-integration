@@ -30,7 +30,7 @@ async function checkAndInviteCustomer(email, name, jsmProjectKey, headers, jiraD
     }
 }
 
-app.post('/stripetojira', express.raw({ type: 'application/json' }), async (req, res) => {
+app.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
 
