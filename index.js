@@ -240,4 +240,5 @@ app.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
     }
 });
 
-exports.stripetojira = app;
+// Final export change
+module.exports = app;
