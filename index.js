@@ -10,17 +10,21 @@ const FIELD_EPIC_NAME = 'customfield_10011';
 const FIELD_EPIC_LINK = 'customfield_10014';
 const FIELD_START_DATE = 'customfield_10015';
 
-// Helper: find Jira accountId by email
+/**
+ * Helper: find Jira accountId by email
+ */
 async function getJiraAccountIdByEmail(email, jiraDomain, headers) {
     if (!email) {
         console.warn("⚠️ No email provided, cannot resolve accountId.");
         return null;
     }
-    
     try {
-        const res = await axios.get(`${jiraDomain}/rest/api/3/user/search?query=${encodeURIComponent(email)}`, { headers });
+        const res = await axios.get(
+            `${jiraDomain}/rest/api/3/user/search?query=${encodeURIComponent(email)}`,
+            { headers }
+        );
         if (res.data && res.data.length > 0) {
-            console.log(`✅ Found Jira accountId for ${email}.`);
+            console.log(`✅ Found Jira accountId for ${email}`);
             return res.data[0].accountId;
         }
         console.warn(`⚠️ No Jira accountId found for email: ${email}`);
@@ -31,26 +35,41 @@ async function getJiraAccountIdByEmail(email, jiraDomain, headers) {
     }
 }
 
-// Helper: check and invite a customer to the JSM portal
+/**
+ * Helper: check and invite a customer to the JSM portal
+ */
 async function checkAndInviteCustomer(email, name, jsmProjectKey, headers, jiraDomain) {
+    await jiraPost(
+        `${jiraDomain}/rest/servicedesk/1/customer`,
+        { email, displayName: name, projects: [jsmProjectKey] },
+        headers,
+        `Inviting customer ${email}`
+    );
+}
+
+/**
+ * Unified helper for Jira API POST requests with logging
+ */
+async function jiraPost(url, payload, headers, actionDesc) {
     try {
-        await axios.post(`${jiraDomain}/rest/servicedesk/1/customer`, {
-            email: email,
-            displayName: name,
-            projects: [jsmProjectKey]
-        }, { headers });
-        console.log(`✅ Successfully invited customer: ${email} to JSM portal.`);
+        const res = await axios.post(url, payload, { headers });
+        console.log(`✅ Success: ${actionDesc} [${url}]`);
+        return res.data;
     } catch (err) {
-        if (err.response?.status === 409) {
-            console.log(`ℹ️ Customer ${email} already exists in JSM portal.`);
+        console.error(`❌ Failed: ${actionDesc} [${url}]`);
+        if (err.response) {
+            console.error('Status:', err.response.status);
+            console.error('Response:', JSON.stringify(err.response.data, null, 2));
         } else {
-            console.error('❌ Error inviting customer to JSM portal:', err.response?.data || err.message);
-            throw new Error('Failed to invite customer to JSM portal.');
+            console.error('Error:', err.message);
         }
+        throw err;
     }
 }
 
-// This helper function now contains all the Jira workflow logic
+/**
+ * Process a completed checkout session in the background
+ */
 async function processCheckoutSession(session) {
     const metadata = session.metadata || {};
     const customerDetails = session.customer_details || {};
@@ -63,7 +82,7 @@ async function processCheckoutSession(session) {
 
     if (!projectKey && issueType.toLowerCase() !== 'support') {
         console.error('❌ Missing project key in Stripe metadata.');
-        return; // Exit the background process
+        return;
     }
 
     const customerEmail = customerDetails.email;
@@ -94,89 +113,108 @@ async function processCheckoutSession(session) {
         const reporterObject = jiraAccountId ? { accountId: jiraAccountId } : { emailAddress: customerEmail };
 
         if (issueType.toLowerCase() === 'support') {
-            await axios.post(`${jiraDomain}/rest/api/3/issue`, {
-                fields: {
-                    project: { key: jsmProjectKey },
-                    summary: `Support Request for ${summary}`,
-                    issuetype: { name: 'Service Request' },
-                    description: {
-                        "type": "doc",
-                        "version": 1,
-                        "content": [
-                            { "type": "paragraph", "content": [{ "type": "text", "text": `A new support request has been submitted by the customer.` }] },
-                            { "type": "paragraph", "content": [{ "type": "text", "text": `Customer: ${customerName}` }] },
-                            { "type": "paragraph", "content": [{ "type": "text", "text": `Email: ${customerEmail}` }] },
-                            { "type": "paragraph", "content": [{ "type": "text", "text": `Amount Paid: ${amountPaid.toFixed(2)} ${currency}` }] }
-                        ]
-                    },
-                    'reporter': reporterObject
-                }
-            }, { headers });
-            console.log('✅ Jira Service Management ticket created.');
+            await jiraPost(
+                `${jiraDomain}/rest/api/3/issue`,
+                {
+                    fields: {
+                        project: { key: jsmProjectKey },
+                        summary: `Support Request for ${summary}`,
+                        issuetype: { name: 'Service Request' },
+                        description: {
+                            type: "doc",
+                            version: 1,
+                            content: [
+                                { type: "paragraph", content: [{ type: "text", text: `A new support request has been submitted by the customer.` }] },
+                                { type: "paragraph", content: [{ type: "text", text: `Customer: ${customerName}` }] },
+                                { type: "paragraph", content: [{ type: "text", text: `Email: ${customerEmail}` }] },
+                                { type: "paragraph", content: [{ type: "text", text: `Amount Paid: ${amountPaid.toFixed(2)} ${currency}` }] }
+                            ]
+                        },
+                        reporter: reporterObject
+                    }
+                },
+                headers,
+                'Creating JSM support request'
+            );
         } else {
-            const epicResponse = await axios.post(`${jiraDomain}/rest/api/3/issue`, {
-                fields: {
-                    project: { key: projectKey },
-                    summary: 'New Client',
-                    issuetype: { name: 'Epic' },
-                    [FIELD_EPIC_NAME]: 'New Client'
-                }
-            }, { headers });
+            const epic = await jiraPost(
+                `${jiraDomain}/rest/api/3/issue`,
+                {
+                    fields: {
+                        project: { key: projectKey },
+                        summary: 'New Client',
+                        issuetype: { name: 'Epic' },
+                        [FIELD_EPIC_NAME]: 'New Client'
+                    }
+                },
+                headers,
+                'Creating Epic'
+            );
 
-            const epicKey = epicResponse.data.key;
+            const epicKey = epic.key;
 
-            const taskResponse = await axios.post(`${jiraDomain}/rest/api/3/issue`, {
-                fields: {
-                    project: { key: projectKey },
-                    summary: summary,
-                    issuetype: { name: issueType },
-                    description: {
-                        "type": "doc",
-                        "version": 1,
-                        "content": [
-                            { "type": "paragraph", "content": [{ "type": "text", "text": `Customer: ${customerName}` }] },
-                            { "type": "paragraph", "content": [{ "type": "text", "text": `Email: ${customerEmail}` }] },
-                            { "type": "paragraph", "content": [{ "type": "text", "text": `Phone: ${phone}` }] },
-                            { "type": "paragraph", "content": [{ "type": "text", "text": `Company Address: ${companyAddress}` }] },
-                            { "type": "paragraph", "content": [{ "type": "text", "text": `Amount Paid: ${amountPaid.toFixed(2)} ${currency}` }] },
-                            { "type": "paragraph", "content": [{ "type": "text", "text": `Start Date: ${startDate}` }] },
-                            { "type": "paragraph", "content": [{ "type": "text", "text": `End Date: ${endDate}` }] }
-                        ]
-                    },
-                    [FIELD_START_DATE]: startDate,
-                    duedate: endDate,
-                    [FIELD_EPIC_LINK]: epicKey,
-                    'reporter': reporterObject
-                }
-            }, { headers });
+            const task = await jiraPost(
+                `${jiraDomain}/rest/api/3/issue`,
+                {
+                    fields: {
+                        project: { key: projectKey },
+                        summary,
+                        issuetype: { name: issueType },
+                        description: {
+                            type: "doc",
+                            version: 1,
+                            content: [
+                                { type: "paragraph", content: [{ type: "text", text: `Customer: ${customerName}` }] },
+                                { type: "paragraph", content: [{ type: "text", text: `Email: ${customerEmail}` }] },
+                                { type: "paragraph", content: [{ type: "text", text: `Phone: ${phone}` }] },
+                                { type: "paragraph", content: [{ type: "text", text: `Company Address: ${companyAddress}` }] },
+                                { type: "paragraph", content: [{ type: "text", text: `Amount Paid: ${amountPaid.toFixed(2)} ${currency}` }] },
+                                { type: "paragraph", content: [{ type: "text", text: `Start Date: ${startDate}` }] },
+                                { type: "paragraph", content: [{ type: "text", text: `End Date: ${endDate}` }] }
+                            ]
+                        },
+                        [FIELD_START_DATE]: startDate,
+                        duedate: endDate,
+                        [FIELD_EPIC_LINK]: epicKey,
+                        reporter: reporterObject
+                    }
+                },
+                headers,
+                'Creating Task'
+            );
 
-            const taskKey = taskResponse.data.key;
+            const taskKey = task.key;
 
-            await axios.post(`${jiraDomain}/rest/api/3/issue`, {
-                fields: {
-                    project: { key: jsmProjectKey },
-                    summary: `Order received for "${summary}"`,
-                    issuetype: { name: 'Service Request' },
-                    description: {
-                        "type": "doc",
-                        "version": 1,
-                        "content": [
-                            { "type": "paragraph", "content": [{ "type": "text", "text": `Your order has been received. Our team has created an internal task to begin work.` }] },
-                            { "type": "paragraph", "content": [{ "type": "text", "text": `Internal Task: ${jiraDomain}/browse/${taskKey}` }] }
-                        ]
-                    },
-                    'reporter': reporterObject
-                }
-            }, { headers });
-
-            console.log(`✅ Jira Epic, Task, and JSM ticket created.`);
+            await jiraPost(
+                `${jiraDomain}/rest/api/3/issue`,
+                {
+                    fields: {
+                        project: { key: jsmProjectKey },
+                        summary: `Order received for "${summary}"`,
+                        issuetype: { name: 'Service Request' },
+                        description: {
+                            type: "doc",
+                            version: 1,
+                            content: [
+                                { type: "paragraph", content: [{ type: "text", text: `Your order has been received. Our team has created an internal task to begin work.` }] },
+                                { type: "paragraph", content: [{ type: "text", text: `Internal Task: ${jiraDomain}/browse/${taskKey}` }] }
+                            ]
+                        },
+                        reporter: reporterObject
+                    }
+                },
+                headers,
+                'Creating JSM order confirmation'
+            );
         }
     } catch (err) {
-        console.error('❌ Error in Jira workflow:', err.response?.data || err.message);
+        console.error('❌ Jira workflow failed completely:', err.message);
     }
 }
 
-// This route manually reads the raw body and immediately responds to Stripe
+/**
+ * Webhook endpoint — responds immediately, processes in background
+ */
 app.post('/', async (req, res) => {
     let rawBody;
     try {
@@ -201,14 +239,14 @@ app.post('/', async (req, res) => {
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    // Immediately respond to Stripe to prevent a timeout
+    // Respond immediately to Stripe
     res.status(200).send('Event received');
 
-    // Process the event in the background *without* waiting for it to finish
+    // Background processing
     if (event.type === 'checkout.session.completed') {
-        processCheckoutSession(event.data.object).catch(err => {
-            console.error('❌ Background Jira workflow failed:', err.response?.data || err.message);
-        });
+        processCheckoutSession(event.data.object).catch(err =>
+            console.error('❌ Background Jira workflow failed:', err)
+        );
     }
 });
 
