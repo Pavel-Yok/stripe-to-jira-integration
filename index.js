@@ -192,4 +192,8 @@ app.post('/stripetojira', express.raw({ type: 'application/json' }), async (req,
     }
 });
 
-exports.stripetojira = app;
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => {
+  console.log(`🚀 Server listening on port ${PORT}`);
+});
+
