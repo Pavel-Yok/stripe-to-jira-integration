@@ -240,5 +240,5 @@ app.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
     }
 });
 
-// Final export change
-module.exports = app;
+// Correct export for Cloud Functions (Gen 2) with a named entry point
+exports.stripetojira = app;
