@@ -216,6 +216,7 @@ async function processCheckoutSession(session) {
  * Webhook endpoint — responds immediately, processes in background
  */
 app.post('/', async (req, res) => {
+    console.log("1. Starting to process request.");
     let rawBody;
     try {
         rawBody = await new Promise((resolve, reject) => {
@@ -224,20 +225,22 @@ app.post('/', async (req, res) => {
             req.on('end', () => resolve(Buffer.concat(chunks)));
             req.on('error', reject);
         });
+        console.log("2. Raw body read successfully.");
     } catch (err) {
         console.error('❌ Error reading raw body:', err);
         return res.status(500).send('Failed to read request body');
     }
 
     const sig = req.headers['stripe-signature'];
-    let event;
-    try {
-        event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
-        console.log(`✅ Event verified: ${event.type}`);
-    } catch (err) {
-        console.error('❌ Webhook signature verification failed:', err.message);
-        return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
+let event;
+console.log("3. Attempting to construct Stripe event.");
+try {
+    event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
+    console.log(`✅ 4. Event verified: ${event.type}`);
+} catch (err) {
+    console.error('❌ Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+}
 
     // Respond immediately to Stripe
     res.status(200).send('Event received');
