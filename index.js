@@ -50,13 +50,26 @@ async function checkAndInviteCustomer(email, name, jsmProjectKey, headers, jiraD
     }
 }
 
-// Dedicated middleware for the webhook route to ensure raw body is used
-app.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
+// This route handles the webhook. It manually reads the raw body
+app.post('/', async (req, res) => {
+    let rawBody;
+    try {
+        rawBody = await new Promise((resolve, reject) => {
+            const chunks = [];
+            req.on('data', chunk => chunks.push(chunk));
+            req.on('end', () => resolve(Buffer.concat(chunks)));
+            req.on('error', reject);
+        });
+    } catch (err) {
+        console.error('❌ Error reading raw body:', err);
+        return res.status(500).send('Failed to read request body');
+    }
+
     const sig = req.headers['stripe-signature'];
     let event;
 
     try {
-        event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+        event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
         console.log(`✅ Event verified: ${event.type}`);
     } catch (err) {
         console.error('❌ Webhook signature verification failed:', err.message);
@@ -108,7 +121,6 @@ app.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
         await checkAndInviteCustomer(customerEmail, customerName, jsmProjectKey, headers, jiraDomain);
         const jiraAccountId = await getJiraAccountIdByEmail(customerEmail, jiraDomain, headers);
 
-        // Define the reporter object based on whether an accountId was found
         const reporterObject = jiraAccountId ? { accountId: jiraAccountId } : { emailAddress: customerEmail };
 
         if (issueType.toLowerCase() === 'support') {
