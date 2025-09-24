@@ -1,7 +1,5 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
-const express = require('express');
-const app = express();
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
@@ -213,10 +211,16 @@ async function processCheckoutSession(session) {
 }
 
 /**
- * Webhook endpoint — responds immediately, processes in background
+ * Webhook endpoint — this is a native Cloud Function handler, not an Express app.
+ * It's the only way to guarantee access to the raw body.
  */
-app.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
-    const rawBody = req.body;
+exports.stripetojira = async (req, res) => {
+    // Read the raw body directly from the stream
+    const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    await new Promise(resolve => req.on('end', resolve));
+    const rawBody = Buffer.concat(chunks);
+
     const sig = req.headers['stripe-signature'];
     let event;
 
@@ -238,7 +242,4 @@ app.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
             console.error('❌ Background Jira workflow failed:', err)
         );
     }
-});
-
-// Correct export for Cloud Functions (Gen 2) with a named entry point
-exports.stripetojira = app;
+};
