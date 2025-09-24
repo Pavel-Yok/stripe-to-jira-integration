@@ -10,7 +10,7 @@ const FIELD_EPIC_NAME = 'customfield_10011';
 const FIELD_EPIC_LINK = 'customfield_10014';
 const FIELD_START_DATE = 'customfield_10015';
 
-// Helper function to check and invite a customer to the JSM portal
+// Helper function to check and invite a customer to The JSM portal
 async function checkAndInviteCustomer(email, name, jsmProjectKey, headers, jiraDomain) {
     try {
         await axios.post(`${jiraDomain}/rest/servicedesk/1/customer`, {
