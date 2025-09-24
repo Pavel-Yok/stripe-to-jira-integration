@@ -37,8 +37,8 @@ async function getJiraAccountIdByEmail(email, jiraDomain, headers) {
  */
 async function checkAndInviteCustomer(email, name, jsmProjectKey, headers, jiraDomain) {
     await jiraPost(
-        `${jiraDomain}/rest/servicedesk/1/customer`,
-        { email, displayName: name, projects: [jsmProjectKey] },
+        `${jiraDomain}/rest/servicedeskapi/customer`,
+        { email, displayName: name }, // ✅ no "projects" in JSM Cloud
         headers,
         `Inviting customer ${email}`
     );
