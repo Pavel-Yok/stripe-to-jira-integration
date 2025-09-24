@@ -10,7 +10,28 @@ const FIELD_EPIC_NAME = 'customfield_10011';
 const FIELD_EPIC_LINK = 'customfield_10014';
 const FIELD_START_DATE = 'customfield_10015';
 
-// Helper function to check and invite a customer to The JSM portal
+// Helper: find Jira accountId by email
+async function getJiraAccountIdByEmail(email, jiraDomain, headers) {
+    if (!email) {
+        console.warn("⚠️ No email provided, cannot resolve accountId.");
+        return null;
+    }
+    
+    try {
+        const res = await axios.get(`${jiraDomain}/rest/api/3/user/search?query=${encodeURIComponent(email)}`, { headers });
+        if (res.data && res.data.length > 0) {
+            console.log(`✅ Found Jira accountId for ${email}.`);
+            return res.data[0].accountId;
+        }
+        console.warn(`⚠️ No Jira accountId found for email: ${email}`);
+        return null;
+    } catch (err) {
+        console.error('❌ Error fetching Jira accountId:', err.response?.data || err.message);
+        return null;
+    }
+}
+
+// Helper: check and invite a customer to the JSM portal
 async function checkAndInviteCustomer(email, name, jsmProjectKey, headers, jiraDomain) {
     try {
         await axios.post(`${jiraDomain}/rest/servicedesk/1/customer`, {
@@ -18,30 +39,32 @@ async function checkAndInviteCustomer(email, name, jsmProjectKey, headers, jiraD
             displayName: name,
             projects: [jsmProjectKey]
         }, { headers });
-        console.log(`Successfully invited customer: ${email} to JSM portal.`);
+        console.log(`✅ Successfully invited customer: ${email} to JSM portal.`);
     } catch (err) {
-        // A 409 Conflict status code means the user already exists
         if (err.response?.status === 409) {
-            console.log(`Customer ${email} already exists in JSM portal.`);
+            console.log(`ℹ️ Customer ${email} already exists in JSM portal.`);
         } else {
-            console.error('Error inviting customer to JSM portal:', err.response?.data || err.message);
+            console.error('❌ Error inviting customer to JSM portal:', err.response?.data || err.message);
             throw new Error('Failed to invite customer to JSM portal.');
         }
     }
 }
 
+// Dedicated middleware for the webhook route to ensure raw body is used
 app.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
 
     try {
         event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+        console.log(`✅ Event verified: ${event.type}`);
     } catch (err) {
-        console.error('Webhook signature verification failed.', err.message);
+        console.error('❌ Webhook signature verification failed:', err.message);
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
     if (event.type !== 'checkout.session.completed') {
+        console.log(`⚠️ Event type '${event.type}' ignored.`);
         return res.status(200).send('Event ignored');
     }
 
@@ -55,9 +78,8 @@ app.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
     const amountPaid = (session.amount_total || 0) / 100;
     const currency = session.currency?.toUpperCase() || 'EUR';
 
-    // --- Critical Error Handling for Missing projectKey ---
     if (!projectKey && issueType.toLowerCase() !== 'support') {
-        console.error('Missing project key in Stripe metadata.');
+        console.error('❌ Missing project key in Stripe metadata.');
         return res.status(400).send('Missing project key in Stripe metadata.');
     }
 
@@ -84,10 +106,12 @@ app.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
 
     try {
         await checkAndInviteCustomer(customerEmail, customerName, jsmProjectKey, headers, jiraDomain);
+        const jiraAccountId = await getJiraAccountIdByEmail(customerEmail, jiraDomain, headers);
 
-        // --- Conditional Logic based on Stripe Metadata ---
+        // Define the reporter object based on whether an accountId was found
+        const reporterObject = jiraAccountId ? { accountId: jiraAccountId } : { emailAddress: customerEmail };
+
         if (issueType.toLowerCase() === 'support') {
-            // Case 1: Create a single JSM ticket for support
             await axios.post(`${jiraDomain}/rest/api/3/issue`, {
                 fields: {
                     project: { key: jsmProjectKey },
@@ -97,38 +121,18 @@ app.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
                         "type": "doc",
                         "version": 1,
                         "content": [
-                            {
-                                "type": "paragraph",
-                                "content": [
-                                    { "type": "text", "text": `A new support request has been submitted by the customer.` }
-                                ]
-                            },
-                            {
-                                "type": "paragraph",
-                                "content": [
-                                    { "type": "text", "text": `Customer: ${customerName}` }
-                                ]
-                            },
-                            {
-                                "type": "paragraph",
-                                "content": [
-                                    { "type": "text", "text": `Email: ${customerEmail}` }
-                                ]
-                            },
-                            {
-                                "type": "paragraph",
-                                "content": [
-                                    { "type": "text", "text": `Amount Paid: ${amountPaid.toFixed(2)} ${currency}` }
-                                ]
-                            }
+                            { "type": "paragraph", "content": [{ "type": "text", "text": `A new support request has been submitted by the customer.` }] },
+                            { "type": "paragraph", "content": [{ "type": "text", "text": `Customer: ${customerName}` }] },
+                            { "type": "paragraph", "content": [{ "type": "text", "text": `Email: ${customerEmail}` }] },
+                            { "type": "paragraph", "content": [{ "type": "text", "text": `Amount Paid: ${amountPaid.toFixed(2)} ${currency}` }] }
                         ]
                     },
-                    [FIELD_EPIC_LINK]: customerEmail // Raise on behalf of field
+                    'reporter': reporterObject
                 }
             }, { headers });
+            console.log('✅ Jira Service Management ticket created.');
             res.status(200).send('Jira Service Management ticket created');
         } else {
-            // Case 2: Create a Jira Epic/Task and a linked JSM ticket
             const epicResponse = await axios.post(`${jiraDomain}/rest/api/3/issue`, {
                 fields: {
                     project: { key: projectKey },
@@ -160,13 +164,13 @@ app.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
                     },
                     [FIELD_START_DATE]: startDate,
                     duedate: endDate,
-                    [FIELD_EPIC_LINK]: epicKey
+                    [FIELD_EPIC_LINK]: epicKey,
+                    'reporter': reporterObject
                 }
             }, { headers });
 
             const taskKey = taskResponse.data.key;
 
-            // Create a JSM ticket for customer visibility
             await axios.post(`${jiraDomain}/rest/api/3/issue`, {
                 fields: {
                     project: { key: jsmProjectKey },
@@ -180,14 +184,15 @@ app.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
                             { "type": "paragraph", "content": [{ "type": "text", "text": `Internal Task: ${jiraDomain}/browse/${taskKey}` }] }
                         ]
                     },
-                    [FIELD_EPIC_LINK]: customerEmail
+                    'reporter': reporterObject
                 }
             }, { headers });
 
+            console.log(`✅ Jira Epic, Task, and JSM ticket created.`);
             res.status(200).send('Jira Epic, Task, and JSM ticket created');
         }
     } catch (err) {
-        console.error('Error in Jira workflow:', err.response?.data || err.message);
+        console.error('❌ Error in Jira workflow:', err.response?.data || err.message);
         res.status(500).send('Failed to execute Jira workflow');
     }
 });
