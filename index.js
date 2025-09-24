@@ -50,38 +50,8 @@ async function checkAndInviteCustomer(email, name, jsmProjectKey, headers, jiraD
     }
 }
 
-// This route handles the webhook. It manually reads the raw body
-app.post('/', async (req, res) => {
-    let rawBody;
-    try {
-        rawBody = await new Promise((resolve, reject) => {
-            const chunks = [];
-            req.on('data', chunk => chunks.push(chunk));
-            req.on('end', () => resolve(Buffer.concat(chunks)));
-            req.on('error', reject);
-        });
-    } catch (err) {
-        console.error('❌ Error reading raw body:', err);
-        return res.status(500).send('Failed to read request body');
-    }
-
-    const sig = req.headers['stripe-signature'];
-    let event;
-
-    try {
-        event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
-        console.log(`✅ Event verified: ${event.type}`);
-    } catch (err) {
-        console.error('❌ Webhook signature verification failed:', err.message);
-        return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
-
-    if (event.type !== 'checkout.session.completed') {
-        console.log(`⚠️ Event type '${event.type}' ignored.`);
-        return res.status(200).send('Event ignored');
-    }
-
-    const session = event.data.object;
+// This helper function now contains all the Jira workflow logic
+async function processCheckoutSession(session) {
     const metadata = session.metadata || {};
     const customerDetails = session.customer_details || {};
     const projectKey = metadata.project?.toUpperCase();
@@ -93,7 +63,7 @@ app.post('/', async (req, res) => {
 
     if (!projectKey && issueType.toLowerCase() !== 'support') {
         console.error('❌ Missing project key in Stripe metadata.');
-        return res.status(400).send('Missing project key in Stripe metadata.');
+        return; // Exit the background process
     }
 
     const customerEmail = customerDetails.email;
@@ -143,7 +113,6 @@ app.post('/', async (req, res) => {
                 }
             }, { headers });
             console.log('✅ Jira Service Management ticket created.');
-            res.status(200).send('Jira Service Management ticket created');
         } else {
             const epicResponse = await axios.post(`${jiraDomain}/rest/api/3/issue`, {
                 fields: {
@@ -201,11 +170,45 @@ app.post('/', async (req, res) => {
             }, { headers });
 
             console.log(`✅ Jira Epic, Task, and JSM ticket created.`);
-            res.status(200).send('Jira Epic, Task, and JSM ticket created');
         }
     } catch (err) {
         console.error('❌ Error in Jira workflow:', err.response?.data || err.message);
-        res.status(500).send('Failed to execute Jira workflow');
+    }
+}
+
+// This route manually reads the raw body and immediately responds to Stripe
+app.post('/', async (req, res) => {
+    let rawBody;
+    try {
+        rawBody = await new Promise((resolve, reject) => {
+            const chunks = [];
+            req.on('data', chunk => chunks.push(chunk));
+            req.on('end', () => resolve(Buffer.concat(chunks)));
+            req.on('error', reject);
+        });
+    } catch (err) {
+        console.error('❌ Error reading raw body:', err);
+        return res.status(500).send('Failed to read request body');
+    }
+
+    const sig = req.headers['stripe-signature'];
+    let event;
+    try {
+        event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
+        console.log(`✅ Event verified: ${event.type}`);
+    } catch (err) {
+        console.error('❌ Webhook signature verification failed:', err.message);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    // Immediately respond to Stripe to prevent a timeout
+    res.status(200).send('Event received');
+
+    // Process the event in the background without waiting for it to finish
+    if (event.type === 'checkout.session.completed') {
+        processCheckoutSession(event.data.object).catch(err =>
+            console.error('❌ Background Jira workflow failed:', err)
+        );
     }
 });
 
