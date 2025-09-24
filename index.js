@@ -1,6 +1,5 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
-
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 // Use named constants for Jira custom fields
@@ -211,21 +210,14 @@ async function processCheckoutSession(session) {
 }
 
 /**
- * Webhook endpoint — this is a native Cloud Function handler, not an Express app.
- * It's the only way to guarantee access to the raw body.
+ * Main Cloud Function handler.
  */
 exports.stripetojira = async (req, res) => {
-    // Read the raw body directly from the stream
-    const chunks = [];
-    req.on('data', chunk => chunks.push(chunk));
-    await new Promise(resolve => req.on('end', resolve));
-    const rawBody = Buffer.concat(chunks);
-
     const sig = req.headers['stripe-signature'];
     let event;
 
     try {
-        event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
+        event = stripe.webhooks.constructEvent(req.rawBody, sig, webhookSecret);
         console.log(`✅ Event verified: ${event.type}`);
     } catch (err) {
         console.error('❌ Webhook signature verification failed:', err.message);
@@ -236,10 +228,10 @@ exports.stripetojira = async (req, res) => {
     res.status(200).send('Event received');
     console.log("⚡ Response sent to Stripe");
 
-    // Background processing
+    // Start background processing
     if (event.type === 'checkout.session.completed') {
-        processCheckoutSession(event.data.object).catch(err =>
-            console.error('❌ Background Jira workflow failed:', err)
-        );
+        processCheckoutSession(event.data.object).catch(err => {
+            console.error('❌ Background Jira workflow failed:', err);
+        });
     }
 };
