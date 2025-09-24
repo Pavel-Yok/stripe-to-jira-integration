@@ -68,6 +68,8 @@ async function jiraPost(url, payload, headers, actionDesc) {
  * Process a completed checkout session in the background
  */
 async function processCheckoutSession(session) {
+    console.log("📝 Session metadata:", session.metadata);
+
     const metadata = session.metadata || {};
     const customerDetails = session.customer_details || {};
     const projectKey = metadata.project?.toUpperCase();
@@ -213,6 +215,12 @@ async function processCheckoutSession(session) {
  * Main Cloud Function handler.
  */
 exports.stripetojira = async (req, res) => {
+    // New: Guard for missing rawBody
+    if (!req.rawBody) {
+        console.error("❌ Missing rawBody on request");
+        return res.status(400).send("Webhook Error: Missing raw body");
+    }
+
     const sig = req.headers['stripe-signature'];
     let event;
 
@@ -228,10 +236,14 @@ exports.stripetojira = async (req, res) => {
     res.status(200).send('Event received');
     console.log("⚡ Response sent to Stripe");
 
-    // Start background processing
+    // Start background processing based on event type
     if (event.type === 'checkout.session.completed') {
         processCheckoutSession(event.data.object).catch(err => {
-            console.error('❌ Background Jira workflow failed:', err);
+            // New: More detailed background error logging
+            console.error(`❌ Failed to process event ${event.id}:`, err);
         });
+    } else {
+        // New: Log and ignore unknown event types
+        console.log(`ℹ️ Ignored event type: ${event.type}`);
     }
 };
