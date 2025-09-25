@@ -88,10 +88,10 @@ async function sendCustomerInvite(email, headers, jiraDomain) {
 async function jiraPost(url, payload, headers, actionDesc) {
     try {
         const res = await axios.post(url, payload, { headers });
-        console.log(`✅ Success: ${actionDesc} [${url}]`);
+        console.log(`✅ Success: ${actionDesc} [${String(url)}]`);
         return res.data;
     } catch (err) {
-        console.error(`❌ Failed: ${actionDesc} [${url}]`);
+        console.error(`❌ Failed: ${actionDesc} [${String(url)}]`);
         if (err.response) {
             console.error('Status:', err.response.status);
             console.error('Response:', JSON.stringify(err.response.data, null, 2));
@@ -106,7 +106,6 @@ async function jiraPost(url, payload, headers, actionDesc) {
  * Process a completed checkout session in the background
  */
 async function processCheckoutSession(session) {
-// Change this line:
 console.log("📝 Session metadata:", session.metadata);
 
 
@@ -138,12 +137,14 @@ console.log("📝 Session metadata:", session.metadata);
 
     const jiraAuth = Buffer.from(`${process.env.JIRA_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
     const jiraDomain = process.env.JIRA_DOMAIN;
+    console.log("🔍 Jira Domain:", jiraDomain);
     const jsmProjectKey = process.env.JIRA_JSM_PROJECT_KEY;
     const headers = {
         'Authorization': `Basic ${jiraAuth}`,
         'Accept': 'application/json',
         'Content-Type': 'application/json'
     };
+    console.log("🔍 Jira Domain (from env):", jiraDomain);
 
     try {
         await checkAndInviteCustomer(customerEmail, customerName, jsmProjectKey, headers, jiraDomain);
