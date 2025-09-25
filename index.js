@@ -6,6 +6,7 @@ const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 const FIELD_EPIC_NAME = 'customfield_10011';
 const FIELD_EPIC_LINK = 'customfield_10014';
 const FIELD_START_DATE = 'customfield_10015';
+const jsmIssueTypeId = process.env.JIRA_JSM_ISSUE_TYPE_ID || '10018'; // Using ID for stability
 
 /**
  * Generic Jira POST helper with detailed logging
@@ -54,24 +55,11 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain) {
 
 /**
  * Explicitly send JSM invite email
+ * NOTE: This function is not used in Cloud. It is kept here for reference.
+ * The checkAndInviteCustomer function already sends the welcome email.
  */
 async function sendCustomerInvite(email, jsmServiceDeskId, headers, jiraDomain) {
-    try {
-        await jiraPost(
-            `${jiraDomain}/rest/servicedeskapi/servicedesk/${jsmServiceDeskId}/customer/invite`,
-            { emails: [email] },
-            headers,
-            `Sending invite email to ${email}`
-        );
-    } catch (err) {
-        console.error(`❌ Failed to send invite to ${email}`);
-        if (err.response) {
-            console.error('Status:', err.response.status);
-            console.error('Response:', JSON.stringify(err.response.data, null, 2));
-        } else {
-            console.error('Error:', err.message);
-        }
-    }
+    console.log(`❌ Skipped sendCustomerInvite - This is not needed in Jira Cloud.`);
 }
 
 /**
@@ -164,7 +152,7 @@ async function createJsmSupportTicket(summary, jsmProjectKey, jiraDomain, header
             fields: {
                 project: { key: jsmProjectKey },
                 summary: `Support Request for ${summary}`,
-                issuetype: { name: 'Service Request' },
+                issuetype: { id: jsmIssueTypeId },
                 description: {
                     type: "doc",
                     version: 1,
@@ -193,7 +181,7 @@ async function createJsmOrderConfirmation(summary, taskKey, jsmProjectKey, jiraD
             fields: {
                 project: { key: jsmProjectKey },
                 summary: `Order received for "${summary}"`,
-                issuetype: { name: 'Service Request' },
+                issuetype: { id: jsmIssueTypeId },
                 description: {
                     type: "doc",
                     version: 1,
@@ -259,13 +247,11 @@ async function processCheckoutSession(session) {
     console.log("🔍 Jira Domain:", jiraDomain);
 
     try {
-        // 1️⃣ Onboard customer (invite first)
-        if (jsmProjectKey && jsmServiceDeskId) {
+        // 1️⃣ Onboard customer (this also sends the welcome email)
+        if (jsmProjectKey) {
             await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain);
-            console.log(`📨 Attempting to send invite to ${customerEmail} for JSM desk ${jsmServiceDeskId}...`);
-            await sendCustomerInvite(customerEmail, jsmServiceDeskId, headers, jiraDomain);
         } else {
-            console.warn("⚠️ Skipping JSM onboarding — missing jsmProjectKey or jsmServiceDeskId.");
+            console.warn("⚠️ Skipping JSM onboarding — missing jsmProjectKey.");
         }
 
         // 2️⃣ Reporter
