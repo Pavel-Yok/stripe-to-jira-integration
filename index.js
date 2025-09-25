@@ -28,7 +28,29 @@ async function jiraPost(url, payload, headers, logMessage) {
 }
 
 /**
- * Create or skip JSM customer, then send invite email
+ * Find Jira accountId from email
+ */
+async function getJiraAccountIdByEmail(email, jiraDomain, headers) {
+    try {
+        const res = await axios.get(
+            `${jiraDomain}/rest/api/3/user/search?query=${encodeURIComponent(email)}`,
+            { headers }
+        );
+        if (res.data && res.data.length > 0) {
+            const accountId = res.data[0].accountId;
+            console.log(`✅ Found accountId for ${email}: ${accountId}`);
+            return accountId;
+        }
+        console.warn(`⚠️ No Jira accountId found for ${email}`);
+        return null;
+    } catch (err) {
+        console.error(`❌ Failed to fetch Jira accountId for ${email}:`, err.response?.data || err.message);
+        return null;
+    }
+}
+
+/**
+ * Create or skip JSM customer, then send invite email by adding to the desk
  */
 async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServiceDeskId) {
     // Step 1: Create or get the customer account
@@ -47,29 +69,33 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServi
         if (alreadyExists) {
             console.log(`✅ Customer ${email} already exists. Skipping creation.`);
         } else {
-            console.error(`❌ Unexpected error creating customer ${email}:`, err.response?.data || err.message);
             throw err;
         }
     }
 
-    // Step 2: Add customer to the specific service desk (this sends the email)
-    // This call will fail if the customer is already part of the service desk.
+    // Step 2: Add to service desk using accountId (triggers invite email if new)
+    const accountId = await getJiraAccountIdByEmail(email, jiraDomain, headers);
+    if (!accountId) {
+        console.warn(`⚠️ Skipping invite — no accountId found for ${email}`);
+        return null;
+    }
+
     try {
         await jiraPost(
             `${jiraDomain}/rest/servicedeskapi/servicedesk/${jsmServiceDeskId}/customer`,
-            { email }, // This is the payload that works consistently for this endpoint.
+            { accountIds: [accountId] },
             headers,
             `Adding customer ${email} to JSM desk ${jsmServiceDeskId}`
         );
-        console.log(`📨 Invite email sent to ${email}`);
+        console.log(`📨 Invite email triggered for ${email}`);
+        return accountId;
     } catch (err) {
-        // Refined error handling: only treat 409 or a specific message as "already added"
-        const alreadyAdded = err.response?.status === 409 ||
+        const alreadyAdded = err.response?.status === 400 ||
             (err.response?.data?.errorMessage || '').includes('already belongs to');
         if (alreadyAdded) {
-            console.log(`✅ Customer ${email} already added to JSM desk ${jsmServiceDeskId}. Skipping.`);
+            console.log(`✅ Customer ${email} already in JSM desk ${jsmServiceDeskId}. Skipping.`);
+            return accountId;
         } else {
-            console.error(`❌ Unexpected error adding customer to JSM desk ${jsmServiceDeskId}:`, err.response?.data || err.message);
             throw err;
         }
     }
@@ -163,15 +189,16 @@ async function processCheckoutSession(session) {
     console.log("🔍 Jira Domain:", jiraDomain);
 
     try {
-        // 1️⃣ Onboard customer + invite
+        // 1️⃣ Onboard customer + invite (get accountId if possible)
+        let accountId = null;
         if (jsmProjectKey && jsmServiceDeskId) {
-            await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain, jsmServiceDeskId);
+            accountId = await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain, jsmServiceDeskId);
         } else {
             console.warn("⚠️ Skipping JSM onboarding — missing jsmProjectKey or jsmServiceDeskId.");
         }
 
-        // 2️⃣ Reporter (optional — use Jira accountId if exists)
-        const reporterObject = { emailAddress: customerEmail };
+        // 2️⃣ Reporter: prefer accountId, fallback to email
+        const reporterObject = accountId ? { accountId } : { emailAddress: customerEmail };
 
         // 3️⃣ Always create Support issue
         if (jsmProjectKey) {
