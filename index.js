@@ -33,53 +33,15 @@ async function getJiraAccountIdByEmail(email, jiraDomain, headers) {
 }
 
 /**
- * Helper: check and invite a customer to the JSM portal
+ * Helper: check and invite a customer to the JSM portal (without sending email invite)
  */
 async function checkAndInviteCustomer(email, name, headers, jiraDomain) {
-    try {
-        await jiraPost(
-            `${jiraDomain}/rest/servicedeskapi/customer`,
-            { email, displayName: name },
-            headers,
-            `Inviting customer ${email}`
-        );
-    } catch (err) {
-        // Check for the "user already exists" error message.
-        const isUserExistsError =
-            err.response?.status === 409 ||
-            (err.response?.data?.errorMessages?.some(msg => msg.includes("already exists"))) ||
-            (err.response?.data?.errorMessage?.includes("An account already exists for this email"));
-
-        if (isUserExistsError) {
-            console.log(`✅ Customer ${email} already exists. Skipping invitation.`);
-        } else {
-            console.error(`❌ Unexpected error inviting ${email}:`, err.response?.data || err.message);
-        }
-    }
-}
-
-
-/**
- * Helper: explicitly send an invite email to a JSM customer
- */
-async function sendCustomerInvite(email, headers, jiraDomain) {
-    try {
-        const res = await axios.post(
-            `${jiraDomain}/rest/servicedeskapi/customer/batch`,
-            { sendInvite: true, usernames: [email] },
-            { headers }
-        );
-        console.log(`📧 Invite sent to ${email}`);
-        return res.data;
-    } catch (err) {
-        console.error(`❌ Failed to send invite to ${email}`);
-        if (err.response) {
-            console.error('Status:', err.response.status);
-            console.error('Response:', JSON.stringify(err.response.data, null, 2));
-        } else {
-            console.error('Error:', err.message);
-        }
-    }
+    await jiraPost(
+        `${jiraDomain}/rest/servicedeskapi/customer`,
+        { email, displayName: name }, // no projects, no batch sendInvite
+        headers,
+        `Inviting customer ${email}`
+    );
 }
 
 /**
@@ -88,10 +50,10 @@ async function sendCustomerInvite(email, headers, jiraDomain) {
 async function jiraPost(url, payload, headers, actionDesc) {
     try {
         const res = await axios.post(url, payload, { headers });
-        console.log(`✅ Success: ${actionDesc} [${String(url)}]`);
+        console.log(`✅ Success: ${actionDesc} [${url}]`);
         return res.data;
     } catch (err) {
-        console.error(`❌ Failed: ${actionDesc} [${String(url)}]`);
+        console.error(`❌ Failed: ${actionDesc} [${url}]`);
         if (err.response) {
             console.error('Status:', err.response.status);
             console.error('Response:', JSON.stringify(err.response.data, null, 2));
@@ -106,8 +68,7 @@ async function jiraPost(url, payload, headers, actionDesc) {
  * Process a completed checkout session in the background
  */
 async function processCheckoutSession(session) {
-console.log("📝 Session metadata:", session.metadata);
-
+    console.log("📝 Session metadata:", session.metadata);
 
     const metadata = session.metadata || {};
     const customerDetails = session.customer_details || {};
@@ -137,20 +98,18 @@ console.log("📝 Session metadata:", session.metadata);
 
     const jiraAuth = Buffer.from(`${process.env.JIRA_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
     const jiraDomain = process.env.JIRA_DOMAIN;
-    console.log("🔍 Jira Domain:", jiraDomain);
     const jsmProjectKey = process.env.JIRA_JSM_PROJECT_KEY;
     const headers = {
         'Authorization': `Basic ${jiraAuth}`,
         'Accept': 'application/json',
         'Content-Type': 'application/json'
     };
-    console.log("🔍 Jira Domain (from env):", jiraDomain);
 
     try {
+        // Just add the customer to JSM (no invite email sent)
         await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain);
-        // await sendCustomerInvite(customerEmail, headers, jiraDomain);
-        const jiraAccountId = await getJiraAccountIdByEmail(customerEmail, jiraDomain, headers);
 
+        const jiraAccountId = await getJiraAccountIdByEmail(customerEmail, jiraDomain, headers);
         const reporterObject = jiraAccountId ? { accountId: jiraAccountId } : { emailAddress: customerEmail };
 
         if (issueType.toLowerCase() === 'support') {
@@ -249,22 +208,20 @@ console.log("📝 Session metadata:", session.metadata);
             );
         }
     } catch (err) {
-    console.error('❌ Jira workflow failed completely');
-    if (err.response) {
-        console.error('Status:', err.response.status);
-        console.error('Response:', JSON.stringify(err.response.data, null, 2));
-    } else {
-        console.error('Error:', err.message);
+        console.error('❌ Jira workflow failed completely');
+        if (err.response) {
+            console.error('Status:', err.response.status);
+            console.error('Response:', JSON.stringify(err.response.data, null, 2));
+        } else {
+            console.error('Error:', err.message);
+        }
     }
-}
-
 }
 
 /**
  * Main Cloud Function handler.
  */
 exports.stripetojira = async (req, res) => {
-    // New: Guard for missing rawBody
     if (!req.rawBody) {
         console.error("❌ Missing rawBody on request");
         return res.status(400).send("Webhook Error: Missing raw body");
@@ -281,19 +238,14 @@ exports.stripetojira = async (req, res) => {
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    // Respond immediately to Stripe
     res.status(200).send('Event received');
     console.log("⚡ Response sent to Stripe");
 
-    // Start background processing based on event type
-    // And change this line to ensure you pass the right data to the function:
-     if (event.type === 'checkout.session.completed') {
-      processCheckoutSession(event.data.object).catch(err => {
-            // New: More detailed background error logging
+    if (event.type === 'checkout.session.completed') {
+        processCheckoutSession(event.data.object).catch(err => {
             console.error(`❌ Failed to process event ${event.id}:`, err);
         });
     } else {
-        // New: Log and ignore unknown event types
         console.log(`ℹ️ Ignored event type: ${event.type}`);
     }
 };
