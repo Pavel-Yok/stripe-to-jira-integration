@@ -233,8 +233,15 @@ console.log("📝 Session metadata:", session.metadata);
             );
         }
     } catch (err) {
-        console.error('❌ Jira workflow failed completely:', err.message);
+    console.error('❌ Jira workflow failed completely');
+    if (err.response) {
+        console.error('Status:', err.response.status);
+        console.error('Response:', JSON.stringify(err.response.data, null, 2));
+    } else {
+        console.error('Error:', err.message);
     }
+}
+
 }
 
 /**
