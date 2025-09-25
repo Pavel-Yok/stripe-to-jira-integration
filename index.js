@@ -33,16 +33,54 @@ async function getJiraAccountIdByEmail(email, jiraDomain, headers) {
 }
 
 /**
- * Helper: check and invite a customer to the JSM portal (without sending email invite)
+ * Helper: check and invite a customer to the JSM portal (with graceful error handling)
  */
 async function checkAndInviteCustomer(email, name, headers, jiraDomain) {
-    await jiraPost(
-        `${jiraDomain}/rest/servicedeskapi/customer`,
-        { email, displayName: name }, // no projects, no batch sendInvite
-        headers,
-        `Inviting customer ${email}`
-    );
+    try {
+        await jiraPost(
+            `${jiraDomain}/rest/servicedeskapi/customer`,
+            { email, displayName: name },
+            headers,
+            `Inviting customer ${email}`
+        );
+    } catch (err) {
+        // Handle "user already exists" errors gracefully.
+        const errorMessages = err.response?.data?.errorMessages;
+        const isUserExistsError =
+            err.response?.status === 409 ||
+            (Array.isArray(errorMessages) && errorMessages.some(msg => msg.includes("already exists"))) ||
+            (err.response?.data?.errorMessage?.includes("An account already exists for this email"));
+
+        if (isUserExistsError) {
+            console.log(`✅ Customer ${email} already exists. Skipping invitation.`);
+        } else {
+            console.error(`❌ Unexpected error inviting ${email}:`, err.response?.data || err.message);
+        }
+    }
 }
+
+/**
+ * Helper: explicitly send an invite email to a JSM customer
+ */
+async function sendCustomerInvite(email, headers, jiraDomain) {
+    try {
+        await jiraPost(
+            `${jiraDomain}/rest/servicedeskapi/customer/batch`,
+            { usernames: [email], sendInvite: true },
+            headers,
+            `Sending invite email to ${email}`
+        );
+    } catch (err) {
+        console.error(`❌ Failed to send invite to ${email}`);
+        if (err.response) {
+            console.error('Status:', err.response.status);
+            console.error('Response:', JSON.stringify(err.response.data, null, 2));
+        } else {
+            console.error('Error:', err.message);
+        }
+    }
+}
+
 
 /**
  * Unified helper for Jira API POST requests with logging
@@ -64,12 +102,12 @@ async function jiraPost(url, payload, headers, actionDesc) {
     }
 }
 
+
 /**
  * Process a completed checkout session in the background
  */
 async function processCheckoutSession(session) {
     console.log("📝 Session metadata:", session.metadata);
-
     const metadata = session.metadata || {};
     const customerDetails = session.customer_details || {};
     const projectKey = metadata.project?.toUpperCase();
@@ -98,18 +136,21 @@ async function processCheckoutSession(session) {
 
     const jiraAuth = Buffer.from(`${process.env.JIRA_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
     const jiraDomain = process.env.JIRA_DOMAIN;
+    console.log("🔍 Jira Domain:", jiraDomain);
     const jsmProjectKey = process.env.JIRA_JSM_PROJECT_KEY;
     const headers = {
         'Authorization': `Basic ${jiraAuth}`,
         'Accept': 'application/json',
         'Content-Type': 'application/json'
     };
+    console.log("🔍 Jira Domain (from env):", jiraDomain);
 
     try {
-        // Just add the customer to JSM (no invite email sent)
         await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain);
-
+        console.log(`📨 Attempting to send invite to ${customerEmail}...`);
+        await sendCustomerInvite(customerEmail, headers, jiraDomain);
         const jiraAccountId = await getJiraAccountIdByEmail(customerEmail, jiraDomain, headers);
+
         const reporterObject = jiraAccountId ? { accountId: jiraAccountId } : { emailAddress: customerEmail };
 
         if (issueType.toLowerCase() === 'support') {
@@ -217,6 +258,7 @@ async function processCheckoutSession(session) {
         }
     }
 }
+
 
 /**
  * Main Cloud Function handler.
