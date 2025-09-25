@@ -1,4 +1,6 @@
 const axios = require('axios');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 // Jira custom field IDs (✅ real ones from your instance)
 const FIELD_EPIC_NAME = 'customfield_10011';
@@ -291,3 +293,35 @@ async function processCheckoutSession(session) {
         }
     }
 }
+
+/**
+ * Main Cloud Function handler
+ */
+exports.stripetojira = async (req, res) => {
+    if (!req.rawBody) {
+        console.error("❌ Missing rawBody on request");
+        return res.status(400).send("Webhook Error: Missing raw body");
+    }
+
+    const sig = req.headers['stripe-signature'];
+    let event;
+
+    try {
+        event = stripe.webhooks.constructEvent(req.rawBody, sig, webhookSecret);
+        console.log(`✅ Event verified: ${event.type}`);
+    } catch (err) {
+        console.error("❌ Webhook signature verification failed:", err.message);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    res.status(200).send("Event received");
+    console.log("⚡ Response sent to Stripe");
+
+    if (event.type === 'checkout.session.completed') {
+        processCheckoutSession(event.data.object).catch(err => {
+            console.error(`❌ Failed to process event ${event.id}:`, err);
+        });
+    } else {
+        console.log(`ℹ️ Ignored event type: ${event.type}`);
+    }
+};
