@@ -155,7 +155,7 @@ async function createJsmSupportTicket(summary, jsmProjectKey, jiraDomain, header
                 [FIELD_START_DATE]: startDate,
                 duedate: endDate,
                 reporter: reporterObject,
-                customfield_10057: 'auto-stripe'
+                customfield_10225: 'auto-stripe'
             }
         },
         headers,
