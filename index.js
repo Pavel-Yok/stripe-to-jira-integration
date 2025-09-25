@@ -44,28 +44,6 @@ async function checkAndInviteCustomer(email, name, jsmProjectKey, headers, jiraD
     );
 }
 
-/**
- * Helper: explicitly send an invite email to a JSM customer
- */
-async function sendCustomerInvite(email, headers, jiraDomain) {
-    try {
-        const res = await axios.post(
-            `${jiraDomain}/rest/servicedeskapi/customer/batch`,
-            { sendInvite: true, usernames: [email] },
-            { headers }
-        );
-        console.log(`📧 Invite sent to ${email}`);
-        return res.data;
-    } catch (err) {
-        console.error(`❌ Failed to send invite to ${email}`);
-        if (err.response) {
-            console.error('Status:', err.response.status);
-            console.error('Response:', JSON.stringify(err.response.data, null, 2));
-        } else {
-            console.error('Error:', err.message);
-        }
-    }
-}
 
 /**
  * Unified helper for Jira API POST requests with logging
@@ -132,7 +110,6 @@ console.log("📝 Session metadata:", session.metadata);
 
     try {
         await checkAndInviteCustomer(customerEmail, customerName, jsmProjectKey, headers, jiraDomain);
-        await sendCustomerInvite(customerEmail, headers, jiraDomain);
         const jiraAccountId = await getJiraAccountIdByEmail(customerEmail, jiraDomain, headers);
 
         const reporterObject = jiraAccountId ? { accountId: jiraAccountId } : { emailAddress: customerEmail };
@@ -233,13 +210,7 @@ console.log("📝 Session metadata:", session.metadata);
             );
         }
     } catch (err) {
-    console.error('❌ Jira workflow failed completely');
-    if (err.response) {
-        console.error('Status:', err.response.status);
-        console.error('Response:', JSON.stringify(err.response.data, null, 2));
-    } else {
-        console.error('Error:', err.message);
-    }
+    console.error('❌ Jira workflow failed completely:', err.message);
 }
 
 }
