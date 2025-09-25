@@ -35,7 +35,7 @@ async function getJiraAccountIdByEmail(email, jiraDomain, headers) {
 /**
  * Helper: check and invite a customer to the JSM portal
  */
-async function checkAndInviteCustomer(email, name, jsmProjectKey, headers, jiraDomain) {
+async function checkAndInviteCustomer(email, name, headers, jiraDomain) {
     try {
         await jiraPost(
             `${jiraDomain}/rest/servicedeskapi/customer`,
@@ -44,20 +44,20 @@ async function checkAndInviteCustomer(email, name, jsmProjectKey, headers, jiraD
             `Inviting customer ${email}`
         );
     } catch (err) {
-        // Handle "user already exists" errors gracefully.
-        const errorMessages = err.response?.data?.errorMessages;
-
-        if (
+        // Check for the "user already exists" error message.
+        const isUserExistsError =
             err.response?.status === 409 ||
-            (Array.isArray(errorMessages) && errorMessages.some(msg => msg.includes("already exists")))
-        ) {
+            (err.response?.data?.errorMessages?.some(msg => msg.includes("already exists"))) ||
+            (err.response?.data?.errorMessage?.includes("An account already exists for this email"));
+
+        if (isUserExistsError) {
             console.log(`✅ Customer ${email} already exists. Skipping invitation.`);
         } else {
-            // Log other errors but do not re-throw.
             console.error(`❌ Unexpected error inviting ${email}:`, err.response?.data || err.message);
         }
     }
 }
+
 
 /**
  * Helper: explicitly send an invite email to a JSM customer
@@ -147,7 +147,7 @@ console.log("📝 Session metadata:", session.metadata);
     console.log("🔍 Jira Domain (from env):", jiraDomain);
 
     try {
-        await checkAndInviteCustomer(customerEmail, customerName, jsmProjectKey, headers, jiraDomain);
+        await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain);
         // await sendCustomerInvite(customerEmail, headers, jiraDomain);
         const jiraAccountId = await getJiraAccountIdByEmail(customerEmail, jiraDomain, headers);
 
