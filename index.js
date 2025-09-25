@@ -35,7 +35,7 @@ async function getJiraAccountIdByEmail(email, jiraDomain, headers) {
 /**
  * Helper: check and invite a customer to the JSM portal
  */
-async function checkAndInviteCustomer(email, name, headers, jiraDomain) {
+async function checkAndInviteCustomer(email, name, jsmProjectKey, headers, jiraDomain) {
     try {
         await jiraPost(
             `${jiraDomain}/rest/servicedeskapi/customer`,
