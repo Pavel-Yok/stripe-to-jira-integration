@@ -1,39 +1,33 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const axios = require('axios');
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
-// Use named constants for Jira custom fields
+// Jira custom field IDs (✅ real ones from your instance)
 const FIELD_EPIC_NAME = 'customfield_10011';
 const FIELD_EPIC_LINK = 'customfield_10014';
 const FIELD_START_DATE = 'customfield_10015';
 
 /**
- * Helper: find Jira accountId by email
+ * Generic Jira POST helper with detailed logging
  */
-async function getJiraAccountIdByEmail(email, jiraDomain, headers) {
-    if (!email) {
-        console.warn("⚠️ No email provided, cannot resolve accountId.");
-        return null;
-    }
+async function jiraPost(url, payload, headers, logMessage) {
+    console.log(`⚡ ${logMessage} [${url}]`);
     try {
-        const res = await axios.get(
-            `${jiraDomain}/rest/api/3/user/search?query=${encodeURIComponent(email)}`,
-            { headers }
-        );
-        if (res.data && res.data.length > 0) {
-            console.log(`✅ Found Jira accountId for ${email}`);
-            return res.data[0].accountId;
-        }
-        console.warn(`⚠️ No Jira accountId found for email: ${email}`);
-        return null;
+        const res = await axios.post(url, payload, { headers });
+        console.log(`✅ Success: ${logMessage}`);
+        return res.data;
     } catch (err) {
-        console.error('❌ Error fetching Jira accountId:', err.response?.data || err.message);
-        return null;
+        console.error(`❌ Failed: ${logMessage} [${url}]`);
+        if (err.response) {
+            console.error('Status:', err.response.status);
+            console.error('Response:', JSON.stringify(err.response.data, null, 2));
+        } else {
+            console.error('Error:', err.message);
+        }
+        throw err;
     }
 }
 
 /**
- * Helper: check and invite a customer to the JSM portal (with graceful error handling)
+ * Create or skip JSM customer
  */
 async function checkAndInviteCustomer(email, name, headers, jiraDomain) {
     try {
@@ -44,15 +38,12 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain) {
             `Inviting customer ${email}`
         );
     } catch (err) {
-        // Handle "user already exists" errors gracefully.
-        const errorMessages = err.response?.data?.errorMessages;
-        const isUserExistsError =
+        const errorMessage = err.response?.data?.errorMessage || '';
+        const alreadyExists =
             err.response?.status === 409 ||
-            (Array.isArray(errorMessages) && errorMessages.some(msg => msg.includes("already exists"))) ||
-            (err.response?.data?.errorMessage?.includes("An account already exists for this email"));
-
-        if (isUserExistsError) {
-            console.log(`✅ Customer ${email} already exists. Skipping invitation.`);
+            errorMessage.includes('already exists');
+        if (alreadyExists) {
+            console.log(`✅ Customer ${email} already exists. Skipping creation.`);
         } else {
             console.error(`❌ Unexpected error inviting ${email}:`, err.response?.data || err.message);
         }
@@ -60,15 +51,13 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain) {
 }
 
 /**
- * Helper: explicitly send an invite email to a JSM customer
+ * Explicitly send JSM invite email
  */
-async function sendCustomerInvite(email, jsmProjectKey, headers, jiraDomain) {
+async function sendCustomerInvite(email, jsmServiceDeskId, headers, jiraDomain) {
     try {
         await jiraPost(
-            `${jiraDomain}/rest/servicedeskapi/servicedesk/${jsmProjectKey}/customer/invite`,
-            {
-                emails: [email]   // <-- correct field name
-            },
+            `${jiraDomain}/rest/servicedeskapi/servicedesk/${jsmServiceDeskId}/customer/invite`,
+            { emails: [email] },
             headers,
             `Sending invite email to ${email}`
         );
@@ -84,34 +73,150 @@ async function sendCustomerInvite(email, jsmProjectKey, headers, jiraDomain) {
 }
 
 /**
- * Unified helper for Jira API POST requests with logging
+ * Resolve Jira accountId from email
  */
-async function jiraPost(url, payload, headers, actionDesc) {
+async function getJiraAccountIdByEmail(email, jiraDomain, headers) {
+    if (!email) return null;
     try {
-        const res = await axios.post(url, payload, { headers });
-        console.log(`✅ Success: ${actionDesc} [${url}]`);
-        return res.data;
-    } catch (err) {
-        console.error(`❌ Failed: ${actionDesc} [${url}]`);
-        if (err.response) {
-            console.error('Status:', err.response.status);
-            console.error('Response:', JSON.stringify(err.response.data, null, 2));
-        } else {
-            console.error('Error:', err.message);
+        const res = await axios.get(
+            `${jiraDomain}/rest/api/3/user/search?query=${encodeURIComponent(email)}`,
+            { headers }
+        );
+        if (res.data && res.data.length > 0) {
+            console.log(`✅ Found Jira accountId for ${email}`);
+            return res.data[0].accountId;
         }
-        throw err;
+        console.warn(`⚠️ No Jira accountId found for ${email}`);
+        return null;
+    } catch (err) {
+        console.error(`❌ Failed to fetch Jira accountId for ${email}:`, err.response?.data || err.message);
+        return null;
     }
 }
 
 /**
- * Orchestration: Process a completed checkout session
+ * Build Atlassian Document Format (ADF) for customer description
+ */
+function buildCustomerDescriptionDoc(customerData, startDate, endDate) {
+    return {
+        type: "doc",
+        version: 1,
+        content: [
+            { type: "paragraph", content: [{ type: "text", text: `Customer: ${customerData.name}` }] },
+            { type: "paragraph", content: [{ type: "text", text: `Email: ${customerData.email}` }] },
+            { type: "paragraph", content: [{ type: "text", text: `Phone: ${customerData.phone}` }] },
+            { type: "paragraph", content: [{ type: "text", text: `Company Address: ${customerData.address}` }] },
+            { type: "paragraph", content: [{ type: "text", text: `Amount Paid: ${customerData.amount}` }] },
+            { type: "paragraph", content: [{ type: "text", text: `Start Date: ${startDate}` }] },
+            { type: "paragraph", content: [{ type: "text", text: `End Date: ${endDate}` }] }
+        ]
+    };
+}
+
+/**
+ * Create Jira Software Epic + Task
+ */
+async function createJiraSoftwareWork(jiraSoftwareProjectKey, summary, issueType, reporterObject, customerData, jiraDomain, headers, startDate, endDate) {
+    const epic = await jiraPost(
+        `${jiraDomain}/rest/api/3/issue`,
+        {
+            fields: {
+                project: { key: jiraSoftwareProjectKey },
+                summary: 'New Client',
+                issuetype: { name: 'Epic' },
+                [FIELD_EPIC_NAME]: 'New Client'
+            }
+        },
+        headers,
+        'Creating Epic'
+    );
+
+    const task = await jiraPost(
+        `${jiraDomain}/rest/api/3/issue`,
+        {
+            fields: {
+                project: { key: jiraSoftwareProjectKey },
+                summary,
+                issuetype: { name: issueType },
+                description: buildCustomerDescriptionDoc(customerData, startDate, endDate),
+                [FIELD_START_DATE]: startDate,
+                duedate: endDate,
+                [FIELD_EPIC_LINK]: epic.key,
+                reporter: reporterObject
+            }
+        },
+        headers,
+        'Creating Task'
+    );
+
+    return task.key;
+}
+
+/**
+ * Create JSM Support Request
+ */
+async function createJsmSupportTicket(summary, jsmProjectKey, jiraDomain, headers, reporterObject, customerName, customerEmail, amountPaid, currency) {
+    return jiraPost(
+        `${jiraDomain}/rest/api/3/issue`,
+        {
+            fields: {
+                project: { key: jsmProjectKey },
+                summary: `Support Request for ${summary}`,
+                issuetype: { name: 'Service Request' },
+                description: {
+                    type: "doc",
+                    version: 1,
+                    content: [
+                        { type: "paragraph", content: [{ type: "text", text: `A new support request has been submitted by the customer.` }] },
+                        { type: "paragraph", content: [{ type: "text", text: `Customer: ${customerName}` }] },
+                        { type: "paragraph", content: [{ type: "text", text: `Email: ${customerEmail}` }] },
+                        { type: "paragraph", content: [{ type: "text", text: `Amount Paid: ${amountPaid.toFixed(2)} ${currency}` }] }
+                    ]
+                },
+                reporter: reporterObject
+            }
+        },
+        headers,
+        'Creating JSM support request'
+    );
+}
+
+/**
+ * Create JSM Order Confirmation linked to Jira Software task
+ */
+async function createJsmOrderConfirmation(summary, taskKey, jsmProjectKey, jiraDomain, headers, reporterObject) {
+    return jiraPost(
+        `${jiraDomain}/rest/api/3/issue`,
+        {
+            fields: {
+                project: { key: jsmProjectKey },
+                summary: `Order received for "${summary}"`,
+                issuetype: { name: 'Service Request' },
+                description: {
+                    type: "doc",
+                    version: 1,
+                    content: [
+                        { type: "paragraph", content: [{ type: "text", text: `Your order has been received. Our team has created an internal task to begin work.` }] },
+                        { type: "paragraph", content: [{ type: "text", text: `Internal Task: ${jiraDomain}/browse/${taskKey}` }] }
+                    ]
+                },
+                reporter: reporterObject
+            }
+        },
+        headers,
+        'Creating JSM order confirmation'
+    );
+}
+
+/**
+ * Orchestrator: process checkout session
  */
 async function processCheckoutSession(session) {
     console.log("📝 Session metadata:", session.metadata);
     const metadata = session.metadata || {};
     const customerDetails = session.customer_details || {};
 
-    // Metadata mapping
+    // Metadata
     const jiraSoftwareProjectKey = metadata.project?.toUpperCase() || null;
     const jsmProjectKey = metadata.jsmProjectKey?.toUpperCase() || process.env.JIRA_JSM_PROJECT_KEY;
     const jsmServiceDeskId = metadata.jsmServiceDeskId || process.env.JIRA_JSM_SERVICE_DESK_ID;
@@ -121,7 +226,7 @@ async function processCheckoutSession(session) {
     const amountPaid = (session.amount_total || 0) / 100;
     const currency = session.currency?.toUpperCase() || 'EUR';
 
-    // Customer details
+    // Customer
     const customerEmail = customerDetails.email;
     const customerName = customerDetails.name || 'N/A';
     const phone = customerDetails.phone || 'N/A';
@@ -144,15 +249,15 @@ async function processCheckoutSession(session) {
     // Jira setup
     const jiraAuth = Buffer.from(`${process.env.JIRA_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
     const jiraDomain = process.env.JIRA_DOMAIN;
-    console.log("🔍 Jira Domain:", jiraDomain);
     const headers = {
         'Authorization': `Basic ${jiraAuth}`,
         'Accept': 'application/json',
         'Content-Type': 'application/json'
     };
+    console.log("🔍 Jira Domain:", jiraDomain);
 
     try {
-        // 1️⃣ Customer-facing: Onboard first
+        // 1️⃣ Onboard customer (invite first)
         if (jsmProjectKey && jsmServiceDeskId) {
             await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain);
             console.log(`📨 Attempting to send invite to ${customerEmail} for JSM desk ${jsmServiceDeskId}...`);
@@ -161,25 +266,15 @@ async function processCheckoutSession(session) {
             console.warn("⚠️ Skipping JSM onboarding — missing jsmProjectKey or jsmServiceDeskId.");
         }
 
-        // 2️⃣ Shared setup: Reporter
+        // 2️⃣ Reporter
         const jiraAccountId = await getJiraAccountIdByEmail(customerEmail, jiraDomain, headers);
         const reporterObject = jiraAccountId ? { accountId: jiraAccountId } : { emailAddress: customerEmail };
 
         // 3️⃣ Workflows
         if (issueType.toLowerCase() === 'support' && jsmProjectKey) {
-            // JSM support request
-            await createJsmSupportTicket(
-                summary, jsmProjectKey, jiraDomain, headers,
-                reporterObject, customerName, customerEmail, amountPaid, currency
-            );
+            await createJsmSupportTicket(summary, jsmProjectKey, jiraDomain, headers, reporterObject, customerName, customerEmail, amountPaid, currency);
         } else if (jiraSoftwareProjectKey) {
-            // Jira Software work
-            const taskKey = await createJiraSoftwareWork(
-                jiraSoftwareProjectKey, summary, issueType, reporterObject,
-                customerData, jiraDomain, headers, startDate, endDate
-            );
-
-            // JSM order confirmation (linked to task)
+            const taskKey = await createJiraSoftwareWork(jiraSoftwareProjectKey, summary, issueType, reporterObject, customerData, jiraDomain, headers, startDate, endDate);
             if (jsmProjectKey) {
                 await createJsmOrderConfirmation(summary, taskKey, jsmProjectKey, jiraDomain, headers, reporterObject);
             }
@@ -196,37 +291,3 @@ async function processCheckoutSession(session) {
         }
     }
 }
-
-
-
-/**
- * Main Cloud Function handler.
- */
-exports.stripetojira = async (req, res) => {
-    if (!req.rawBody) {
-        console.error("❌ Missing rawBody on request");
-        return res.status(400).send("Webhook Error: Missing raw body");
-    }
-
-    const sig = req.headers['stripe-signature'];
-    let event;
-
-    try {
-        event = stripe.webhooks.constructEvent(req.rawBody, sig, webhookSecret);
-        console.log(`✅ Event verified: ${event.type}`);
-    } catch (err) {
-        console.error('❌ Webhook signature verification failed:', err.message);
-        return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
-
-    res.status(200).send('Event received');
-    console.log("⚡ Response sent to Stripe");
-
-    if (event.type === 'checkout.session.completed') {
-        processCheckoutSession(event.data.object).catch(err => {
-            console.error(`❌ Failed to process event ${event.id}:`, err);
-        });
-    } else {
-        console.log(`ℹ️ Ignored event type: ${event.type}`);
-    }
-};
