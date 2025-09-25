@@ -1,10 +1,16 @@
+/**
+ * Stripe → Jira Service Management integration
+ * Creates a JSM Support request after a successful Stripe Checkout payment
+ * and ensures the customer is invited to the JSM portal.
+ */
+
 const axios = require('axios');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 // Jira custom field IDs
 const FIELD_START_DATE = 'customfield_10015';
-const jsmIssueTypeId = process.env.JIRA_JSM_ISSUE_TYPE_ID || '10018'; // Support
+const jsmIssueTypeId = process.env.JIRA_JSM_ISSUE_TYPE_ID || '10018'; // Support issue type
 
 /**
  * Generic Jira POST helper with detailed logging
@@ -28,58 +34,72 @@ async function jiraPost(url, payload, headers, logMessage) {
 }
 
 /**
- * Find Jira accountId from email
+ * Search for accountId with retries (handles Jira indexing lag)
  */
-async function getJiraAccountIdByEmail(email, jiraDomain, headers) {
-    try {
-        const res = await axios.get(
-            `${jiraDomain}/rest/api/3/user/search?query=${encodeURIComponent(email)}`,
-            { headers }
-        );
-        if (res.data && res.data.length > 0) {
-            const accountId = res.data[0].accountId;
-            console.log(`✅ Found accountId for ${email}: ${accountId}`);
-            return accountId;
+async function getJiraAccountIdByEmail(email, jiraDomain, headers, retries = 3) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            const res = await axios.get(
+                `${jiraDomain}/rest/api/3/user/search?query=${encodeURIComponent(email)}`,
+                { headers }
+            );
+            if (res.data && res.data.length > 0) {
+                const accountId = res.data[0].accountId;
+                console.log(`✅ Found accountId for ${email}: ${accountId} (attempt ${attempt})`);
+                return accountId;
+            }
+            console.warn(`⚠️ Attempt ${attempt}: No Jira accountId yet for ${email}`);
+        } catch (err) {
+            console.error(`❌ Attempt ${attempt} failed for ${email}:`, err.response?.data || err.message);
         }
-        console.warn(`⚠️ No Jira accountId found for ${email}`);
-        return null;
-    } catch (err) {
-        console.error(`❌ Failed to fetch Jira accountId for ${email}:`, err.response?.data || err.message);
-        return null;
+        if (attempt < retries) {
+            await new Promise(res => setTimeout(res, 1500)); // wait 1.5s before retry
+        }
     }
+    return null;
 }
 
 /**
  * Create or skip JSM customer, then send invite email by adding to the desk
  */
 async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServiceDeskId) {
+    let accountId = null;
+
     // Step 1: Create or get the customer account
     try {
-        await jiraPost(
+        const res = await jiraPost(
             `${jiraDomain}/rest/servicedeskapi/customer`,
             { email, displayName: name },
             headers,
             `Creating customer ${email}`
         );
+        accountId = res.accountId || null;
+        if (accountId) {
+            console.log(`✅ Got accountId from creation response: ${accountId}`);
+        }
     } catch (err) {
         const errorMessage = err.response?.data?.errorMessage || '';
         const alreadyExists =
             err.response?.status === 409 ||
             errorMessage.includes('already exists');
         if (alreadyExists) {
-            console.log(`✅ Customer ${email} already exists. Skipping creation.`);
+            console.log(`✅ Customer ${email} already exists.`);
         } else {
             throw err;
         }
     }
 
-    // Step 2: Add to service desk using accountId (triggers invite email if new)
-    const accountId = await getJiraAccountIdByEmail(email, jiraDomain, headers);
+    // Step 2: If no accountId yet, try search with retries
     if (!accountId) {
-        console.warn(`⚠️ Skipping invite — no accountId found for ${email}`);
+        accountId = await getJiraAccountIdByEmail(email, jiraDomain, headers, 3);
+    }
+
+    if (!accountId) {
+        console.warn(`⚠️ Still no accountId for ${email}, skipping invite.`);
         return null;
     }
 
+    // Step 3: Add to service desk (triggers invite if new)
     try {
         await jiraPost(
             `${jiraDomain}/rest/servicedeskapi/servicedesk/${jsmServiceDeskId}/customer`,
@@ -130,7 +150,7 @@ async function createJsmSupportTicket(summary, jsmProjectKey, jiraDomain, header
             fields: {
                 project: { key: jsmProjectKey },
                 summary: `Support Request for ${summary}`,
-                issuetype: { id: jsmIssueTypeId }, // Always "Support"
+                issuetype: { id: jsmIssueTypeId },
                 description: buildCustomerDescriptionDoc(customerData, startDate, endDate),
                 [FIELD_START_DATE]: startDate,
                 duedate: endDate,
@@ -189,7 +209,7 @@ async function processCheckoutSession(session) {
     console.log("🔍 Jira Domain:", jiraDomain);
 
     try {
-        // 1️⃣ Onboard customer + invite (get accountId if possible)
+        // 1️⃣ Onboard customer + invite
         let accountId = null;
         if (jsmProjectKey && jsmServiceDeskId) {
             accountId = await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain, jsmServiceDeskId);
