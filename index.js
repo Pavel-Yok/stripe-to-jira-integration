@@ -2,7 +2,7 @@ const axios = require('axios');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
-// Jira custom field IDs (✅ real ones from your instance)
+// Jira custom field IDs
 const FIELD_START_DATE = 'customfield_10015';
 const jsmIssueTypeId = process.env.JIRA_JSM_ISSUE_TYPE_ID || '10018'; // Support
 
@@ -31,7 +31,7 @@ async function jiraPost(url, payload, headers, logMessage) {
  * Create or skip JSM customer, then send invite email
  */
 async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServiceDeskId) {
-    let created = false;
+    // Step 1: Create or get the customer account
     try {
         await jiraPost(
             `${jiraDomain}/rest/servicedeskapi/customer`,
@@ -39,7 +39,6 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServi
             headers,
             `Creating customer ${email}`
         );
-        created = true;
     } catch (err) {
         const errorMessage = err.response?.data?.errorMessage || '';
         const alreadyExists =
@@ -48,31 +47,32 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServi
         if (alreadyExists) {
             console.log(`✅ Customer ${email} already exists. Skipping creation.`);
         } else {
-            console.error(`❌ Unexpected error inviting ${email}:`, err.response?.data || err.message);
+            console.error(`❌ Unexpected error creating customer ${email}:`, err.response?.data || err.message);
             throw err;
         }
     }
 
-    // 🔔 Always try to add customer to the service desk (this triggers invite email)
+    // Step 2: Add customer to the specific service desk (this sends the email)
+    // This call will fail if the customer is already part of the service desk.
     try {
         await jiraPost(
             `${jiraDomain}/rest/servicedeskapi/servicedesk/${jsmServiceDeskId}/customer`,
-            { email }, // ✅ correct payload
+            { emailAddresses: [email] },
             headers,
-            `Sending invite email to ${email}`
+            `Adding customer ${email} to JSM desk ${jsmServiceDeskId}`
         );
         console.log(`📨 Invite email sent to ${email}`);
     } catch (err) {
-        console.error(`❌ Failed to send invite to ${email}`);
-        if (err.response) {
-            console.error('Status:', err.response.status);
-            console.error('Response:', JSON.stringify(err.response.data, null, 2));
+        // Refined error handling: only treat 409 or a specific message as "already added"
+        const alreadyAdded = err.response?.status === 409 ||
+            (err.response?.data?.errorMessage || '').includes('already belongs to');
+        if (alreadyAdded) {
+            console.log(`✅ Customer ${email} already added to JSM desk ${jsmServiceDeskId}. Skipping.`);
         } else {
-            console.error('Error:', err.message);
+            console.error(`❌ Unexpected error adding customer to JSM desk ${jsmServiceDeskId}:`, err.response?.data || err.message);
+            throw err;
         }
     }
-
-    return created;
 }
 
 /**
@@ -108,8 +108,7 @@ async function createJsmSupportTicket(summary, jsmProjectKey, jiraDomain, header
                 description: buildCustomerDescriptionDoc(customerData, startDate, endDate),
                 [FIELD_START_DATE]: startDate,
                 duedate: endDate,
-                reporter: reporterObject,
-                labels: ["api-created"] // optional: helps in automation filters
+                reporter: reporterObject
             }
         },
         headers,
