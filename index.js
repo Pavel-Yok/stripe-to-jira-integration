@@ -104,151 +104,87 @@ async function jiraPost(url, payload, headers, actionDesc) {
 }
 
 /**
- * Process a completed checkout session in the background
+ * Orchestration: Process a completed checkout session
  */
 async function processCheckoutSession(session) {
     console.log("📝 Session metadata:", session.metadata);
     const metadata = session.metadata || {};
     const customerDetails = session.customer_details || {};
-    const projectKey = metadata.project?.toUpperCase();
+
+    // Metadata mapping
+    const jiraSoftwareProjectKey = metadata.project?.toUpperCase() || null;
+    const jsmProjectKey = metadata.jsmProjectKey?.toUpperCase() || process.env.JIRA_JSM_PROJECT_KEY;
+    const jsmServiceDeskId = metadata.jsmServiceDeskId || process.env.JIRA_JSM_SERVICE_DESK_ID;
     const issueType = metadata.issue || 'Task';
     const summary = metadata.summary || 'New Task';
     const durationDays = parseInt(metadata.duration || '5', 10);
     const amountPaid = (session.amount_total || 0) / 100;
     const currency = session.currency?.toUpperCase() || 'EUR';
 
-    if (!projectKey && issueType.toLowerCase() !== 'support') {
-        console.error('❌ Missing project key in Stripe metadata.');
-        return;
-    }
-
+    // Customer details
     const customerEmail = customerDetails.email;
     const customerName = customerDetails.name || 'N/A';
     const phone = customerDetails.phone || 'N/A';
     const address = customerDetails.address || {};
-    const companyAddress = [address.line1, address.city, address.postal_code, address.country]
-        .filter(Boolean).join(', ') || 'N/A';
+    const companyAddress = [address.line1, address.city, address.postal_code, address.country].filter(Boolean).join(', ') || 'N/A';
 
+    const customerData = {
+        name: customerName,
+        email: customerEmail,
+        phone,
+        address: companyAddress,
+        amount: `${amountPaid.toFixed(2)} ${currency}`
+    };
+
+    // Dates
     const now = new Date();
     const startDate = now.toISOString().split('T')[0];
-    const endDate = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000)
-        .toISOString().split('T')[0];
+    const endDate = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
+    // Jira setup
     const jiraAuth = Buffer.from(`${process.env.JIRA_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
     const jiraDomain = process.env.JIRA_DOMAIN;
     console.log("🔍 Jira Domain:", jiraDomain);
-    const jsmProjectKey = process.env.JIRA_JSM_PROJECT_KEY;
     const headers = {
         'Authorization': `Basic ${jiraAuth}`,
         'Accept': 'application/json',
         'Content-Type': 'application/json'
     };
-    console.log("🔍 Jira Domain (from env):", jiraDomain);
 
     try {
-        await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain);
-        console.log(`📨 Attempting to send invite to ${customerEmail}...`);
-        await sendCustomerInvite(customerEmail, jsmProjectKey, headers, jiraDomain);
-        const jiraAccountId = await getJiraAccountIdByEmail(customerEmail, jiraDomain, headers);
+        // 1️⃣ Customer-facing: Onboard first
+        if (jsmProjectKey && jsmServiceDeskId) {
+            await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain);
+            console.log(`📨 Attempting to send invite to ${customerEmail} for JSM desk ${jsmServiceDeskId}...`);
+            await sendCustomerInvite(customerEmail, jsmServiceDeskId, headers, jiraDomain);
+        } else {
+            console.warn("⚠️ Skipping JSM onboarding — missing jsmProjectKey or jsmServiceDeskId.");
+        }
 
+        // 2️⃣ Shared setup: Reporter
+        const jiraAccountId = await getJiraAccountIdByEmail(customerEmail, jiraDomain, headers);
         const reporterObject = jiraAccountId ? { accountId: jiraAccountId } : { emailAddress: customerEmail };
 
-        if (issueType.toLowerCase() === 'support') {
-            await jiraPost(
-                `${jiraDomain}/rest/api/3/issue`,
-                {
-                    fields: {
-                        project: { key: jsmProjectKey },
-                        summary: `Support Request for ${summary}`,
-                        issuetype: { name: 'Service Request' },
-                        description: {
-                            type: "doc",
-                            version: 1,
-                            content: [
-                                { type: "paragraph", content: [{ type: "text", text: `A new support request has been submitted by the customer.` }] },
-                                { type: "paragraph", content: [{ type: "text", text: `Customer: ${customerName}` }] },
-                                { type: "paragraph", content: [{ type: "text", text: `Email: ${customerEmail}` }] },
-                                { type: "paragraph", content: [{ type: "text", text: `Amount Paid: ${amountPaid.toFixed(2)} ${currency}` }] }
-                            ]
-                        },
-                        reporter: reporterObject
-                    }
-                },
-                headers,
-                'Creating JSM support request'
+        // 3️⃣ Workflows
+        if (issueType.toLowerCase() === 'support' && jsmProjectKey) {
+            // JSM support request
+            await createJsmSupportTicket(
+                summary, jsmProjectKey, jiraDomain, headers,
+                reporterObject, customerName, customerEmail, amountPaid, currency
             );
+        } else if (jiraSoftwareProjectKey) {
+            // Jira Software work
+            const taskKey = await createJiraSoftwareWork(
+                jiraSoftwareProjectKey, summary, issueType, reporterObject,
+                customerData, jiraDomain, headers, startDate, endDate
+            );
+
+            // JSM order confirmation (linked to task)
+            if (jsmProjectKey) {
+                await createJsmOrderConfirmation(summary, taskKey, jsmProjectKey, jiraDomain, headers, reporterObject);
+            }
         } else {
-            const epic = await jiraPost(
-                `${jiraDomain}/rest/api/3/issue`,
-                {
-                    fields: {
-                        project: { key: projectKey },
-                        summary: 'New Client',
-                        issuetype: { name: 'Epic' },
-                        [FIELD_EPIC_NAME]: 'New Client'
-                    }
-
-            
-                },
-                headers,
-                'Creating Epic'
-            );
-
-            const epicKey = epic.key;
-
-            const task = await jiraPost(
-                `${jiraDomain}/rest/api/3/issue`,
-                {
-                    fields: {
-                        project: { key: projectKey },
-                        summary,
-                        issuetype: { name: issueType },
-                        description: {
-                            type: "doc",
-                            version: 1,
-                            content: [
-                                { type: "paragraph", content: [{ type: "text", text: `Customer: ${customerName}` }] },
-                                { type: "paragraph", content: [{ type: "text", text: `Email: ${customerEmail}` }] },
-                                { type: "paragraph", content: [{ type: "text", text: `Phone: ${phone}` }] },
-                                { type: "paragraph", content: [{ type: "text", text: `Company Address: ${companyAddress}` }] },
-                                { type: "paragraph", content: [{ type: "text", text: `Amount Paid: ${amountPaid.toFixed(2)} ${currency}` }] },
-                                { type: "paragraph", content: [{ type: "text", text: `Start Date: ${startDate}` }] },
-                                { type: "paragraph", content: [{ type: "text", text: `End Date: ${endDate}` }] }
-                            ]
-                        },
-                        [FIELD_START_DATE]: startDate,
-                        duedate: endDate,
-                        [FIELD_EPIC_LINK]: epicKey,
-                        reporter: reporterObject
-                    }
-                },
-                headers,
-                'Creating Task'
-            );
-
-            const taskKey = task.key;
-
-            await jiraPost(
-                `${jiraDomain}/rest/api/3/issue`,
-                {
-                    fields: {
-                        project: { key: jsmProjectKey },
-                        summary: `Order received for "${summary}"`,
-                        issuetype: { name: 'Service Request' },
-                        description: {
-                            type: "doc",
-                            version: 1,
-                            content: [
-                                { type: "paragraph", content: [{ type: "text", text: `Your order has been received. Our team has created an internal task to begin work.` }] },
-                                { type: "paragraph", content: [{ type: "text", text: `Internal Task: ${jiraDomain}/browse/${taskKey}` }] }
-                            ]
-                        },
-                        reporter: reporterObject
-                    }
-                },
-                headers,
-                'Creating JSM order confirmation'
-            );
+            console.warn("⚠️ No Jira Software project key available. Skipping Software + Order Confirmation flow.");
         }
     } catch (err) {
         console.error('❌ Jira workflow failed completely');
@@ -260,6 +196,7 @@ async function processCheckoutSession(session) {
         }
     }
 }
+
 
 
 /**
