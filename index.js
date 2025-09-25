@@ -57,7 +57,7 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServi
     try {
         await jiraPost(
             `${jiraDomain}/rest/servicedeskapi/servicedesk/${jsmServiceDeskId}/customer`,
-            { emailAddresses: [email] },
+            { email }, // This is the payload that works consistently for this endpoint.
             headers,
             `Adding customer ${email} to JSM desk ${jsmServiceDeskId}`
         );
