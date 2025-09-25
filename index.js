@@ -148,7 +148,7 @@ console.log("📝 Session metadata:", session.metadata);
 
     try {
         await checkAndInviteCustomer(customerEmail, customerName, jsmProjectKey, headers, jiraDomain);
-        await sendCustomerInvite(customerEmail, headers, jiraDomain);
+        // await sendCustomerInvite(customerEmail, headers, jiraDomain);
         const jiraAccountId = await getJiraAccountIdByEmail(customerEmail, jiraDomain, headers);
 
         const reporterObject = jiraAccountId ? { accountId: jiraAccountId } : { emailAddress: customerEmail };
