@@ -35,13 +35,28 @@ async function getJiraAccountIdByEmail(email, jiraDomain, headers) {
 /**
  * Helper: check and invite a customer to the JSM portal
  */
-async function checkAndInviteCustomer(email, name, jsmProjectKey, headers, jiraDomain) {
-    await jiraPost(
-        `${jiraDomain}/rest/servicedeskapi/customer`,
-        { email, displayName: name }, // ✅ no "projects" in JSM Cloud
-        headers,
-        `Inviting customer ${email}`
-    );
+async function checkAndInviteCustomer(email, name, headers, jiraDomain) {
+    try {
+        await jiraPost(
+            `${jiraDomain}/rest/servicedeskapi/customer`,
+            { email, displayName: name },
+            headers,
+            `Inviting customer ${email}`
+        );
+    } catch (err) {
+        // Handle "user already exists" errors gracefully.
+        const errorMessages = err.response?.data?.errorMessages;
+
+        if (
+            err.response?.status === 409 ||
+            (Array.isArray(errorMessages) && errorMessages.some(msg => msg.includes("already exists")))
+        ) {
+            console.log(`✅ Customer ${email} already exists. Skipping invitation.`);
+        } else {
+            // Log other errors but do not re-throw.
+            console.error(`❌ Unexpected error inviting ${email}:`, err.response?.data || err.message);
+        }
+    }
 }
 
 /**
