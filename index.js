@@ -33,17 +33,16 @@ async function getJiraAccountIdByEmail(email, jiraDomain, headers) {
 }
 
 /**
- * Helper: check and invite a customer to the JSM portal
+ * Helper: check and invite a customer to the JSM portal (without sending email invite)
  */
-async function checkAndInviteCustomer(email, name, jsmProjectKey, headers, jiraDomain) {
+async function checkAndInviteCustomer(email, name, headers, jiraDomain) {
     await jiraPost(
         `${jiraDomain}/rest/servicedeskapi/customer`,
-        { email, displayName: name }, // ✅ no "projects" in JSM Cloud
+        { email, displayName: name }, // no projects, no batch sendInvite
         headers,
         `Inviting customer ${email}`
     );
 }
-
 
 /**
  * Unified helper for Jira API POST requests with logging
@@ -69,9 +68,7 @@ async function jiraPost(url, payload, headers, actionDesc) {
  * Process a completed checkout session in the background
  */
 async function processCheckoutSession(session) {
-// Change this line:
-console.log("📝 Session metadata:", session.metadata);
-
+    console.log("📝 Session metadata:", session.metadata);
 
     const metadata = session.metadata || {};
     const customerDetails = session.customer_details || {};
@@ -109,9 +106,10 @@ console.log("📝 Session metadata:", session.metadata);
     };
 
     try {
-        await checkAndInviteCustomer(customerEmail, customerName, jsmProjectKey, headers, jiraDomain);
-        const jiraAccountId = await getJiraAccountIdByEmail(customerEmail, jiraDomain, headers);
+        // Just add the customer to JSM (no invite email sent)
+        await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain);
 
+        const jiraAccountId = await getJiraAccountIdByEmail(customerEmail, jiraDomain, headers);
         const reporterObject = jiraAccountId ? { accountId: jiraAccountId } : { emailAddress: customerEmail };
 
         if (issueType.toLowerCase() === 'support') {
@@ -210,16 +208,20 @@ console.log("📝 Session metadata:", session.metadata);
             );
         }
     } catch (err) {
-    console.error('❌ Jira workflow failed completely:', err.message);
-}
-
+        console.error('❌ Jira workflow failed completely');
+        if (err.response) {
+            console.error('Status:', err.response.status);
+            console.error('Response:', JSON.stringify(err.response.data, null, 2));
+        } else {
+            console.error('Error:', err.message);
+        }
+    }
 }
 
 /**
  * Main Cloud Function handler.
  */
 exports.stripetojira = async (req, res) => {
-    // New: Guard for missing rawBody
     if (!req.rawBody) {
         console.error("❌ Missing rawBody on request");
         return res.status(400).send("Webhook Error: Missing raw body");
@@ -236,19 +238,14 @@ exports.stripetojira = async (req, res) => {
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    // Respond immediately to Stripe
     res.status(200).send('Event received');
     console.log("⚡ Response sent to Stripe");
 
-    // Start background processing based on event type
-    // And change this line to ensure you pass the right data to the function:
-     if (event.type === 'checkout.session.completed') {
-      processCheckoutSession(event.data.object).catch(err => {
-            // New: More detailed background error logging
+    if (event.type === 'checkout.session.completed') {
+        processCheckoutSession(event.data.object).catch(err => {
             console.error(`❌ Failed to process event ${event.id}:`, err);
         });
     } else {
-        // New: Log and ignore unknown event types
         console.log(`ℹ️ Ignored event type: ${event.type}`);
     }
 };
