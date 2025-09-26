@@ -1,19 +1,13 @@
-/**
- * Stripe → Jira Service Management integration
- * Creates a JSM Support request after a successful Stripe Checkout payment
- * and ensures the customer is invited to the JSM portal.
- */
-
-const axios = require('axios');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const axios = require('axios');
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 // Jira custom field IDs
 const FIELD_START_DATE = 'customfield_10015';
-// Custom field for the source/origin (your new field)
 const FIELD_SOURCE = 'customfield_10260';
-const SOURCE_VALUE = 'Stripe'; // The value you want to set
-const jsmIssueTypeId = process.env.JIRA_JSM_ISSUE_TYPE_ID || '10018'; // Support issue type
+const SOURCE_VALUE = 'Stripe'; // Value for the Labels field
+// *** CRITICAL JSM IDs ***
+const JSM_REQUEST_TYPE_ID = process.env.JIRA_JSM_REQUEST_TYPE_ID || '47'; // ID for "SUBMIT A TASK"
 
 /**
  * Generic Jira POST helper with detailed logging
@@ -27,7 +21,6 @@ async function jiraPost(url, payload, headers, logMessage) {
     } catch (err) {
         console.error(`❌ Failed: ${logMessage} [${url}]`);
         if (err.response) {
-            // Log the detailed error response from Jira, which often indicates the field problem
             console.error('Status:', err.response.status);
             console.error('Response:', JSON.stringify(err.response.data, null, 2));
         } else {
@@ -145,32 +138,33 @@ function buildCustomerDescriptionDoc(customerData, startDate, endDate) {
 }
 
 /**
- * Create JSM Support Request
+ * Create JSM Customer Request (uses JSM API)
  */
-async function createJsmSupportTicket(summary, jsmProjectKey, jiraDomain, headers, reporterObject, customerData, startDate, endDate) {
-    // Determine the structure for the custom field value based on the field type (Labels field requires an array of strings)
-    let sourceFieldPayload;
-
-    // FIX FOR LABELS FIELD: Customfield_10260 is a Labels field, which requires an array of strings. (Updated comment to force diff)
-    sourceFieldPayload = [SOURCE_VALUE]; 
+async function createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, headers, reporterObject, customerData, startDate, endDate) {
+    const sourceFieldPayload = [SOURCE_VALUE]; 
+    
+    // FIX: Reporter field is NOT valid in this JSM API endpoint. 
+    // We put fields that are valid for the portal in requestFieldValues.
+    const requestFields = {
+        "summary": summary,
+        "description": buildCustomerDescriptionDoc(customerData, startDate, endDate),
+        [FIELD_START_DATE]: startDate,
+        "duedate": endDate,
+        [FIELD_SOURCE]: sourceFieldPayload
+        // Note: 'reporter' is intentionally excluded from requestFields
+    };
 
     return jiraPost(
-        `${jiraDomain}/rest/api/3/issue`,
+        `${jiraDomain}/rest/servicedeskapi/request`,
         {
-            fields: {
-                project: { key: jsmProjectKey },
-                summary: `Support Request for ${summary}`,
-                issuetype: { id: jsmIssueTypeId },
-                description: buildCustomerDescriptionDoc(customerData, startDate, endDate),
-                [FIELD_START_DATE]: startDate,
-                duedate: endDate,
-                reporter: reporterObject,
-                // Using bracket notation and the correct array structure for a Labels field
-                [FIELD_SOURCE]: sourceFieldPayload
-            }
+            serviceDeskId: jsmProjectKey,
+            requestTypeId: JSM_REQUEST_TYPE_ID,
+            // CORRECT WAY: Use raiseOnBehalfOf at the top level of the request
+            raiseOnBehalfOf: customerData.email, 
+            requestFieldValues: requestFields
         },
         headers,
-        'Creating JSM support request'
+        'Creating JSM customer request'
     );
 }
 
@@ -229,12 +223,11 @@ async function processCheckoutSession(session) {
             console.warn("⚠️ Skipping JSM onboarding — missing jsmProjectKey or jsmServiceDeskId.");
         }
 
-        // 2️⃣ Reporter: prefer accountId, fallback to email
-        const reporterObject = accountId ? { accountId } : { emailAddress: customerEmail };
+        // 2️⃣ Reporter: The JSM API handles linking via raiseOnBehalfOf. We skip setting the reporterObject for the ticket creation call.
 
-        // 3️⃣ Always create Support issue
+        // 3️⃣ Create Customer Request (uses JSM API)
         if (jsmProjectKey) {
-            await createJsmSupportTicket(summary, jsmProjectKey, jiraDomain, headers, reporterObject, customerData, startDate, endDate);
+            await createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, headers, null, customerData, startDate, endDate);
         }
     } catch (err) {
         console.error('❌ Jira workflow failed completely');
