@@ -156,7 +156,7 @@ async function createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, head
     return jiraPost(
         `${jiraDomain}/rest/servicedeskapi/request`,
         {
-            serviceDeskId: jsmProjectKey,
+            serviceDeskId: process.env.JIRA_JSM_SERVICE_DESK_ID, // Use numeric ID from environment variable
             requestTypeId: JSM_REQUEST_TYPE_ID,
             raiseOnBehalfOf: customerData.email, 
             requestFieldValues: requestFields
@@ -221,8 +221,8 @@ async function processCheckoutSession(session) {
             console.warn("⚠️ Skipping JSM onboarding — missing jsmProjectKey or jsmServiceDeskId.");
         }
 
-        // 2️⃣ Reporter: We skip the account ID search here as the JSM request API uses raiseOnBehalfOf (email)
-        const reporterObject = { emailAddress: customerEmail }; 
+        // 2️⃣ Reporter: prefer accountId, fallback to email
+        const reporterObject = accountId ? { accountId } : { emailAddress: customerEmail };
 
         // 3️⃣ Create Customer Request (uses JSM API)
         if (jsmProjectKey) {
