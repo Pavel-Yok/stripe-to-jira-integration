@@ -10,6 +10,9 @@ const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 // Jira custom field IDs
 const FIELD_START_DATE = 'customfield_10015';
+// Custom field for the source/origin (your new field)
+const FIELD_SOURCE = 'customfield_10260';
+const SOURCE_VALUE = 'Stripe'; // The value you want to set
 const jsmIssueTypeId = process.env.JIRA_JSM_ISSUE_TYPE_ID || '10018'; // Support issue type
 
 /**
@@ -24,6 +27,7 @@ async function jiraPost(url, payload, headers, logMessage) {
     } catch (err) {
         console.error(`❌ Failed: ${logMessage} [${url}]`);
         if (err.response) {
+            // Log the detailed error response from Jira, which often indicates the field problem
             console.error('Status:', err.response.status);
             console.error('Response:', JSON.stringify(err.response.data, null, 2));
         } else {
@@ -144,6 +148,12 @@ function buildCustomerDescriptionDoc(customerData, startDate, endDate) {
  * Create JSM Support Request
  */
 async function createJsmSupportTicket(summary, jsmProjectKey, jiraDomain, headers, reporterObject, customerData, startDate, endDate) {
+    // Determine the structure for the custom field value based on the field type (Labels field requires an array of strings)
+    let sourceFieldPayload;
+
+    // FIX FOR LABELS FIELD: Customfield_10260 is a Labels field, which requires an array of strings.
+    sourceFieldPayload = [SOURCE_VALUE]; 
+
     return jiraPost(
         `${jiraDomain}/rest/api/3/issue`,
         {
@@ -155,7 +165,8 @@ async function createJsmSupportTicket(summary, jsmProjectKey, jiraDomain, header
                 [FIELD_START_DATE]: startDate,
                 duedate: endDate,
                 reporter: reporterObject,
-                customfield_10260: 'Stripe'
+                // Using bracket notation and the correct array structure for a Labels field
+                [FIELD_SOURCE]: sourceFieldPayload
             }
         },
         headers,
