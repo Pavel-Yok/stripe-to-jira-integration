@@ -121,21 +121,18 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServi
 
 /**
  * Build Atlassian Document Format (ADF) for description
+ * FIX: Now returns a plain text string, as required by the JSM API for this request type.
  */
 function buildCustomerDescriptionDoc(customerData, startDate, endDate) {
-    return {
-        type: "doc",
-        version: 1,
-        content: [
-            { type: "paragraph", content: [{ type: "text", text: `Customer: ${customerData.name}` }] },
-            { type: "paragraph", content: [{ type: "text", text: `Email: ${customerData.email}` }] },
-            { type: "paragraph", content: [{ type: "text", text: `Phone: ${customerData.phone}` }] },
-            { type: "paragraph", content: [{ type: "text", text: `Company Address: ${customerData.address}` }] },
-            { type: "paragraph", content: [{ type: "text", text: `Amount Paid: ${customerData.amount}` }] },
-            { type: "paragraph", content: [{ type: "text", text: `Start Date: ${startDate}` }] },
-            { type: "paragraph", content: [{ type: "text", text: `End Date: ${endDate}` }] }
-        ]
-    };
+    return `
+Customer: ${customerData.name}
+Email: ${customerData.email}
+Phone: ${customerData.phone}
+Company Address: ${customerData.address}
+Amount Paid: ${customerData.amount}
+Start Date: ${startDate}
+End Date: ${endDate}
+`;
 }
 
 /**
@@ -147,9 +144,17 @@ async function createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, head
     // The fields below are CONFIRMED available in the createmeta response.
     const requestFields = {
         "summary": summary,
+        
+        // CRITICAL FIX: Pass the description as a simple string, not an ADF object.
         "description": buildCustomerDescriptionDoc(customerData, startDate, endDate),
+        
+        // Custom Field: Start Date (customfield_10015)
         [FIELD_START_DATE]: startDate,
+        
+        // System Field: Due Date
         "duedate": endDate,
+        
+        // Custom Field: Work Source (customfield_10260) - Labels field requires array of strings
         [FIELD_SOURCE]: sourceFieldPayload
     };
 
