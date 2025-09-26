@@ -142,33 +142,22 @@ function buildCustomerDescriptionDoc(customerData, startDate, endDate) {
  * Create JSM Customer Request (uses JSM API)
  */
 async function createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, headers, reporterObject, customerData, startDate, endDate) {
-    // 🔔 CRITICAL FIX: Build the requestFieldValues object using the verified fields
+    const sourceFieldPayload = [SOURCE_VALUE]; 
+
+    // The fields below are CONFIRMED available in the createmeta response.
     const requestFields = {
-        // Required Field: Summary (Name is "Task name" in JSM)
         "summary": summary,
-        
-        // Optional Field: Description
         "description": buildCustomerDescriptionDoc(customerData, startDate, endDate),
-        
-        // Custom Field: Start Date (customfield_10015)
         [FIELD_START_DATE]: startDate,
-        
-        // System Field: Due Date
         "duedate": endDate,
-        
-        // Custom Field: Work Source (customfield_10260) - Labels field requires array of strings
-        [FIELD_SOURCE]: [SOURCE_VALUE],
-        
-        // Optional Custom Field: The createmeta shows customfield_10090 (Company) is available
-        // Note: For now, we only use the fields we need to ensure minimal payload.
+        [FIELD_SOURCE]: sourceFieldPayload
     };
 
     return jiraPost(
         `${jiraDomain}/rest/servicedeskapi/request`,
         {
             serviceDeskId: jsmProjectKey,
-            requestTypeId: JSM_REQUEST_TYPE_ID, // Corrected constant name
-            // CORRECT WAY: Use raiseOnBehalfOf at the top level for customer attribution
+            requestTypeId: JSM_REQUEST_TYPE_ID,
             raiseOnBehalfOf: customerData.email, 
             requestFieldValues: requestFields
         },
@@ -232,8 +221,8 @@ async function processCheckoutSession(session) {
             console.warn("⚠️ Skipping JSM onboarding — missing jsmProjectKey or jsmServiceDeskId.");
         }
 
-        // 2️⃣ Reporter: prefer accountId, fallback to email
-        const reporterObject = accountId ? { accountId } : { emailAddress: customerEmail };
+        // 2️⃣ Reporter: We skip the account ID search here as the JSM request API uses raiseOnBehalfOf (email)
+        const reporterObject = { emailAddress: customerEmail }; 
 
         // 3️⃣ Create Customer Request (uses JSM API)
         if (jsmProjectKey) {
