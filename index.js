@@ -6,7 +6,8 @@ const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 const FIELD_START_DATE = 'customfield_10015';
 const FIELD_SOURCE = 'customfield_10260';
 const SOURCE_VALUE = 'Stripe'; // Value to set for the Work Source label
-const jsmIssueTypeId = process.env.JIRA_JSM_ISSUE_TYPE_ID || '10018'; // Support issue type
+// CRITICAL JSM ID: This is the numeric Request Type ID required by the JSM API (e.g., 47 for 'SUBMIT A TASK')
+const JSM_REQUEST_TYPE_ID = process.env.JIRA_JSM_REQUEST_TYPE_ID || '47';
 
 /**
  * Generic Jira POST helper with detailed logging
@@ -166,7 +167,7 @@ async function createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, head
         `${jiraDomain}/rest/servicedeskapi/request`,
         {
             serviceDeskId: jsmProjectKey,
-            requestTypeId: JSM_REQUEST_TYPE_ID,
+            requestTypeId: JSM_REQUEST_TYPE_ID, // Corrected constant name
             // CORRECT WAY: Use raiseOnBehalfOf at the top level for customer attribution
             raiseOnBehalfOf: customerData.email, 
             requestFieldValues: requestFields
@@ -231,8 +232,8 @@ async function processCheckoutSession(session) {
             console.warn("⚠️ Skipping JSM onboarding — missing jsmProjectKey or jsmServiceDeskId.");
         }
 
-        // 2️⃣ Reporter: We skip the account ID search here as the JSM request API uses raiseOnBehalfOf (email)
-        const reporterObject = { emailAddress: customerEmail }; 
+        // 2️⃣ Reporter: prefer accountId, fallback to email
+        const reporterObject = accountId ? { accountId } : { emailAddress: customerEmail };
 
         // 3️⃣ Create Customer Request (uses JSM API)
         if (jsmProjectKey) {
