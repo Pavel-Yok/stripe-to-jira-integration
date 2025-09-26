@@ -151,7 +151,7 @@ async function createJsmSupportTicket(summary, jsmProjectKey, jiraDomain, header
     // Determine the structure for the custom field value based on the field type (Labels field requires an array of strings)
     let sourceFieldPayload;
 
-    // FIX FOR LABELS FIELD: Customfield_10260 is a Labels field, which requires an array of strings.
+    // FIX FOR LABELS FIELD: Customfield_10260 is a Labels field, which requires an array of strings. (Updated comment to force diff)
     sourceFieldPayload = [SOURCE_VALUE]; 
 
     return jiraPost(
