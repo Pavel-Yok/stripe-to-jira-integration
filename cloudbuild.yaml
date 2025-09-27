@@ -1,6 +1,3 @@
-options:
-  logging: CLOUD_LOGGING_ONLY
-
 steps:
   - name: 'gcr.io/cloud-builders/gcloud'
     entrypoint: 'bash'
@@ -13,8 +10,8 @@ steps:
           --entry-point=stripetojira \
           --allow-unauthenticated \
           --region=europe-west2 \
-          --set-env-vars=STRIPE_SECRET_KEY=$$(gcloud secrets versions access latest --secret=stripe-secret-key),STRIPE_WEBHOOK_SECRET=$$(gcloud secrets versions access latest --secret=stripe-whsec-webhook-secret),JIRA_EMAIL=$$(gcloud secrets versions access latest --secret=jira-email),JIRA_API_TOKEN=$$(gcloud secrets versions access latest --secret=jira-api-token),JIRA_DOMAIN=$$(gcloud secrets versions access latest --secret=jira-domain)
-        
+          --set-env-vars=JIRA_JSM_SERVICE_DESK_ID=${_JIRA_JSM_SERVICE_DESK_ID},JIRA_JSM_PROJECT_KEY=${_JIRA_JSM_PROJECT_KEY},JIRA_JSM_REQUEST_TYPE_ID=${_JIRA_JSM_REQUEST_TYPE_ID}
+  
   - name: 'gcr.io/cloud-builders/gcloud'
     entrypoint: 'bash'
     args:
@@ -24,3 +21,21 @@ steps:
           --member="allUsers" \
           --role="roles/run.invoker" \
           --region=europe-west2
+
+availableSecrets:
+  secretManager:
+  - versionName: projects/jira-stripe-integration/secrets/STRIPE_SECRET_KEY/versions/latest
+    env: STRIPE_SECRET_KEY
+  - versionName: projects/jira-stripe-integration/secrets/STRIPE_WEBHOOK_SECRET/versions/latest
+    env: STRIPE_WEBHOOK_SECRET
+  - versionName: projects/jira-stripe-integration/secrets/JIRA_EMAIL/versions/latest
+    env: JIRA_EMAIL
+  - versionName: projects/jira-stripe-integration/secrets/JIRA_API_TOKEN/versions/latest
+    env: JIRA_API_TOKEN
+  - versionName: projects/jira-stripe-integration/secrets/JIRA_DOMAIN/versions/latest
+    env: JIRA_DOMAIN
+  
+substitutions:
+  _JIRA_JSM_SERVICE_DESK_ID: "6"
+  _JIRA_JSM_PROJECT_KEY: "YOK"
+  _JIRA_JSM_REQUEST_TYPE_ID: "47"
