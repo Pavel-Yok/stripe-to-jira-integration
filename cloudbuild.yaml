@@ -39,3 +39,6 @@ substitutions:
   _JIRA_JSM_SERVICE_DESK_ID: "6"
   _JIRA_JSM_PROJECT_KEY: "YOK"
   _JIRA_JSM_REQUEST_TYPE_ID: "47"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
