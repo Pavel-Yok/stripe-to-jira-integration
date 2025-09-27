@@ -32,6 +32,3 @@ substitutions:
   _JIRA_JSM_REQUEST_TYPE_ID: "47"
 
 options:
-  logging: CLOUD_LOGGING_ONLY
-  # Optional: Increase machine type for faster build times
-  machineType: 'E2_MEDIUM'
