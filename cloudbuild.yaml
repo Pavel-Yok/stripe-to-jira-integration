@@ -4,6 +4,7 @@ steps:
     args:
       - '-c'
       - |
+        # Deploy the Cloud Function (Gen 2)
         gcloud functions deploy stripetojira \
           --runtime=nodejs20 \
           --trigger-http \
@@ -11,24 +12,26 @@ steps:
           --allow-unauthenticated \
           --region=europe-west2 \
           --update-secrets=STRIPE_SECRET_KEY=stripe-secret-key:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest,JIRA_EMAIL=jira-email:latest,JIRA_API_TOKEN=jira-api-token:latest,JIRA_DOMAIN=jira-domain:latest \
-          --set-env-vars=JIRA_JSM_SERVICE_DESK_ID=${_JIRA_JSM_SERVICE_DESK_ID},JIRA_JSM_PROJECT_KEY=${_JIRA_JSM_PROJECT_KEY},JSM_REQUEST_TYPE_ID=${_JSM_REQUEST_TYPE_ID}
+          --set-env-vars=JIRA_JSM_SERVICE_DESK_ID=${_JIRA_JSM_SERVICE_DESK_ID},JIRA_JSM_PROJECT_KEY=${_JIRA_JSM_PROJECT_KEY},JIRA_JSM_REQUEST_TYPE_ID=${_JIRA_JSM_REQUEST_TYPE_ID}
   
   - name: 'gcr.io/cloud-builders/gcloud'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        # CRITICAL FIX: Ensure the Cloud Run service is publicly invokable
         gcloud run services add-iam-policy-binding stripetojira \
           --member="allUsers" \
           --role="roles/run.invoker" \
           --region=europe-west2
 
 substitutions:
+  # JSM Configuration Variables (These are the values passed to the script)
   _JIRA_JSM_SERVICE_DESK_ID: "6"
   _JIRA_JSM_PROJECT_KEY: "YOK"
-  JSM_REQUEST_TYPE_ID: "47"
+  _JIRA_JSM_REQUEST_TYPE_ID: "47"
 
 options:
   logging: CLOUD_LOGGING_ONLY
-  # Cosmetic change to force deployment:
+  # Optional: Increase machine type for faster build times
   machineType: 'E2_MEDIUM'
