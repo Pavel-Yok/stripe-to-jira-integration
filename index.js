@@ -58,7 +58,7 @@ async function getJiraAccountIdByEmail(email, jiraDomain, headers, retries = 3) 
 }
 
 /**
- * Create or skip JSM customer, then send invite email by adding to the desk
+ * Create or skip JSM customer account (does NOT trigger email invite)
  */
 async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServiceDeskId) {
     let accountId = null;
@@ -93,11 +93,12 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServi
     }
 
     if (!accountId) {
-        console.warn(`⚠️ Still no accountId for ${email}, skipping invite.`);
+        console.warn(`⚠️ Still no accountId for ${email}, skipping ticket creation.`);
         return null;
     }
 
-    // Step 3: Add to service desk (triggers invite if new)
+    // Step 3: Add to service desk (This is now required before creating request)
+    // NOTE: This triggers the welcome email if the JSM project is configured for it.
     try {
         await jiraPost(
             `${jiraDomain}/rest/servicedeskapi/servicedesk/${jsmServiceDeskId}/customer`,
@@ -105,7 +106,7 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServi
             headers,
             `Adding customer ${email} to JSM desk ${jsmServiceDeskId}`
         );
-        console.log(`📨 Invite email triggered for ${email}`);
+        console.log(`✅ Customer added to JSM desk ${jsmServiceDeskId}.`);
         return accountId;
     } catch (err) {
         const alreadyAdded = err.response?.status === 400 ||
@@ -121,7 +122,6 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServi
 
 /**
  * Build Atlassian Document Format (ADF) for description
- * FIX: Now returns a plain text string, as required by the JSM API for this request type.
  */
 function buildCustomerDescriptionDoc(customerData, startDate, endDate) {
     return `
@@ -144,24 +144,16 @@ async function createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, head
     // The fields below are CONFIRMED available in the createmeta response.
     const requestFields = {
         "summary": summary,
-        
-        // CRITICAL FIX: Pass the description as a simple string, not an ADF object.
         "description": buildCustomerDescriptionDoc(customerData, startDate, endDate),
-        
-        // Custom Field: Start Date (customfield_10015)
         [FIELD_START_DATE]: startDate,
-        
-        // System Field: Due Date
         "duedate": endDate,
-        
-        // Custom Field: Work Source (customfield_10260) - Labels field requires array of strings
         [FIELD_SOURCE]: sourceFieldPayload
     };
 
     return jiraPost(
         `${jiraDomain}/rest/servicedeskapi/request`,
         {
-            serviceDeskId: process.env.JIRA_JSM_SERVICE_DESK_ID, // Use numeric ID from environment variable
+            serviceDeskId: process.env.JIRA_JSM_SERVICE_DESK_ID,
             requestTypeId: JSM_REQUEST_TYPE_ID,
             raiseOnBehalfOf: customerData.email, 
             requestFieldValues: requestFields
@@ -218,7 +210,7 @@ async function processCheckoutSession(session) {
     console.log("🔍 Jira Domain:", jiraDomain);
 
     try {
-        // 1️⃣ Onboard customer + invite
+        // 1️⃣ Onboard customer + invite (This step now adds the user AND triggers the email)
         let accountId = null;
         if (jsmProjectKey && jsmServiceDeskId) {
             accountId = await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain, jsmServiceDeskId);
