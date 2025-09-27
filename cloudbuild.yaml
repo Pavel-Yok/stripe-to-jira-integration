@@ -28,7 +28,7 @@ steps:
 substitutions:
   # Conditional variable for switching between live (default) and test configurations.
   # The value is appended to the secret name (e.g., stripe-secret-key-test).
-  _STRIPE_MODE: ""
+  _STRIPE_MODE: "-test"
   # JSM Configuration Variables (These are the values passed to the script)
   _JIRA_JSM_SERVICE_DESK_ID: "6"
   _JIRA_JSM_PROJECT_KEY: "YOK"
