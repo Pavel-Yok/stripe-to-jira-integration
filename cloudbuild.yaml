@@ -11,7 +11,7 @@ steps:
           --entry-point=stripetojira \
           --allow-unauthenticated \
           --region=europe-west2 \
-          --update-secrets=STRIPE_SECRET_KEY=stripe-secret-key:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest,JIRA_EMAIL=jira-email:latest,JIRA_API_TOKEN=jira-api-token:latest,JIRA_DOMAIN=jira-domain:latest \
+          --update-secrets=STRIPE_SECRET_KEY=stripe-secret-key${_STRIPE_MODE}:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret${_STRIPE_MODE}:latest,JIRA_EMAIL=jira-email:latest,JIRA_API_TOKEN=jira-api-token:latest,JIRA_DOMAIN=jira-domain:latest \
           --set-env-vars=JIRA_JSM_SERVICE_DESK_ID=${_JIRA_JSM_SERVICE_DESK_ID},JIRA_JSM_PROJECT_KEY=${_JIRA_JSM_PROJECT_KEY},JIRA_JSM_REQUEST_TYPE_ID=${_JIRA_JSM_REQUEST_TYPE_ID}
   
   - name: 'gcr.io/cloud-builders/gcloud'
@@ -26,12 +26,14 @@ steps:
           --region=europe-west2
 
 substitutions:
+  # Conditional variable for switching between live (default) and test configurations.
+  # The value is appended to the secret name (e.g., stripe-secret-key-test).
+  _STRIPE_MODE: ""
   # JSM Configuration Variables (These are the values passed to the script)
   _JIRA_JSM_SERVICE_DESK_ID: "6"
   _JIRA_JSM_PROJECT_KEY: "YOK"
   _JIRA_JSM_REQUEST_TYPE_ID: "47"
 
 options:
-  # FIX: CLOUD_LOGGING_ONLY MUST be inside the options block to be recognized
-  logging: CLOUD_LOGGING_ONLY 
+  logging: CLOUD_LOGGING_ONLY
   machineType: 'E2_MEDIUM'
