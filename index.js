@@ -58,10 +58,12 @@ async function getJiraAccountIdByEmail(email, jiraDomain, headers, retries = 3) 
 }
 
 /**
- * Create or skip JSM customer account (does NOT trigger email invite)
+ * Create or skip JSM customer, then send invite email by adding to the desk
+ * @returns {boolean} True if customer was newly created, false otherwise.
  */
 async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServiceDeskId) {
     let accountId = null;
+    let createdNewUser = false;
 
     // Step 1: Create or get the customer account
     try {
@@ -75,6 +77,7 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServi
         if (accountId) {
             console.log(`✅ Got accountId from creation response: ${accountId}`);
         }
+        createdNewUser = true; // Mark as newly created
     } catch (err) {
         const errorMessage = err.response?.data?.errorMessage || '';
         const alreadyExists =
@@ -87,18 +90,17 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServi
         }
     }
 
-    // Step 2: If no accountId yet, try search with retries
+    // Step 2: If no accountId yet (meaning user existed), try search with retries
     if (!accountId) {
         accountId = await getJiraAccountIdByEmail(email, jiraDomain, headers, 3);
     }
 
     if (!accountId) {
         console.warn(`⚠️ Still no accountId for ${email}, skipping ticket creation.`);
-        return null;
+        return false; // Cannot proceed without ID
     }
 
-    // Step 3: Add to service desk (This is now required before creating request)
-    // NOTE: This triggers the welcome email if the JSM project is configured for it.
+    // Step 3: Add to service desk (triggers invite/welcome email)
     try {
         await jiraPost(
             `${jiraDomain}/rest/servicedeskapi/servicedesk/${jsmServiceDeskId}/customer`,
@@ -106,18 +108,17 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServi
             headers,
             `Adding customer ${email} to JSM desk ${jsmServiceDeskId}`
         );
-        console.log(`✅ Customer added to JSM desk ${jsmServiceDeskId}.`);
-        return accountId;
+        console.log(`📨 Invite email triggered for ${email}`);
     } catch (err) {
         const alreadyAdded = err.response?.status === 400 ||
             (err.response?.data?.errorMessage || '').includes('already belongs to');
         if (alreadyAdded) {
             console.log(`✅ Customer ${email} already in JSM desk ${jsmServiceDeskId}. Skipping.`);
-            return accountId;
         } else {
             throw err;
         }
     }
+    return createdNewUser;
 }
 
 /**
@@ -138,8 +139,16 @@ End Date: ${endDate}
 /**
  * Create JSM Customer Request (uses JSM API)
  */
-async function createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, headers, reporterObject, customerData, startDate, endDate) {
+async function createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, headers, reporterObject, customerData, startDate, endDate, wasNewCustomer) {
     const sourceFieldPayload = [SOURCE_VALUE]; 
+    
+    // Determine the Labels array based on whether the customer was newly created.
+    const labels = [SOURCE_VALUE];
+    if (wasNewCustomer) {
+        labels.push('NewCustomer'); // Label for automation trigger
+    } else {
+        labels.push('ExistingCustomer');
+    }
 
     // The fields below are CONFIRMED available in the createmeta response.
     const requestFields = {
@@ -147,7 +156,8 @@ async function createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, head
         "description": buildCustomerDescriptionDoc(customerData, startDate, endDate),
         [FIELD_START_DATE]: startDate,
         "duedate": endDate,
-        [FIELD_SOURCE]: sourceFieldPayload
+        [FIELD_SOURCE]: sourceFieldPayload, // Work Source field set to ['Stripe']
+        "labels": labels // Final labels array
     };
 
     return jiraPost(
@@ -210,12 +220,22 @@ async function processCheckoutSession(session) {
     console.log("🔍 Jira Domain:", jiraDomain);
 
     try {
-        // 1️⃣ Onboard customer + invite (This step now adds the user AND triggers the email)
+        // 1️⃣ Onboard customer + invite
+        let wasNewCustomer = false;
         let accountId = null;
+
         if (jsmProjectKey && jsmServiceDeskId) {
-            accountId = await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain, jsmServiceDeskId);
+            wasNewCustomer = await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain, jsmServiceDeskId);
         } else {
             console.warn("⚠️ Skipping JSM onboarding — missing jsmProjectKey or jsmServiceDeskId.");
+        }
+        
+        // After onboarding attempt, try to resolve accountId one more time if needed
+        if (typeof wasNewCustomer === 'string') {
+             accountId = wasNewCustomer; // AccountId was returned from checkAndInviteCustomer (should only happen if created)
+             wasNewCustomer = true;
+        } else if (wasNewCustomer === false) {
+             accountId = await getJiraAccountIdByEmail(customerEmail, jiraDomain, headers, 1); // Try one quick search if user existed
         }
 
         // 2️⃣ Reporter: prefer accountId, fallback to email
@@ -223,7 +243,7 @@ async function processCheckoutSession(session) {
 
         // 3️⃣ Create Customer Request (uses JSM API)
         if (jsmProjectKey) {
-            await createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, headers, reporterObject, customerData, startDate, endDate);
+            await createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, headers, reporterObject, customerData, startDate, endDate, wasNewCustomer);
         }
     } catch (err) {
         console.error('❌ Jira workflow failed completely');
