@@ -139,9 +139,9 @@ End Date: ${endDate}
 }
 
 /**
- * Create JSM Support Request
+ * Create JSM Customer Request (uses JSM API)
  */
-async function createJsmSupportTicket(summary, jsmProjectKey, jiraDomain, headers, customerData, startDate, endDate, wasNewCustomer) {
+async function createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, headers, customerData, startDate, endDate, wasNewCustomer) {
     const sourceFieldPayload = [SOURCE_VALUE]; 
     
     // Determine the label for Customer Type: 'New Customer' or 'Existing Customer'
@@ -236,11 +236,13 @@ async function processCheckoutSession(session) {
         }
 
         // 2️⃣ Reporter: The JSM API handles attribution via raiseOnBehalfOf.
-        const reporterObject = { emailAddress: customerEmail }; 
+        // The reporterObject is NOT USED here.
+        // const reporterObject = accountId ? { accountId } : { emailAddress: customerEmail }; 
 
         // 3️⃣ Create Customer Request (uses JSM API)
         if (jsmProjectKey) {
-            await createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, headers, reporterObject, customerData, startDate, endDate, wasNewCustomer);
+            // Note: The null argument for reporterObject is removed, as it's not used in this function
+            await createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, headers, customerData, startDate, endDate, wasNewCustomer);
         }
     } catch (err) {
         console.error('❌ Jira workflow failed completely');
