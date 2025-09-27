@@ -5,6 +5,7 @@ const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 // Jira custom field IDs
 const FIELD_START_DATE = 'customfield_10015';
 const FIELD_SOURCE = 'customfield_10260';
+const FIELD_CUSTOMER_TYPE = 'customfield_10291'; // New Customer Type field
 const SOURCE_VALUE = 'Stripe'; // Value to set for the Work Source label
 // CRITICAL JSM ID: This is the numeric Request Type ID required by the JSM API (e.g., 47 for 'SUBMIT A TASK')
 const JSM_REQUEST_TYPE_ID = process.env.JIRA_JSM_REQUEST_TYPE_ID || '47';
@@ -59,11 +60,11 @@ async function getJiraAccountIdByEmail(email, jiraDomain, headers, retries = 3) 
 
 /**
  * Create or skip JSM customer, then send invite email by adding to the desk
- * @returns {boolean} True if customer was newly created, false otherwise.
+ * @returns {{accountId: string | null, wasNewCustomer: boolean}} 
  */
 async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServiceDeskId) {
     let accountId = null;
-    let createdNewUser = false;
+    let wasNewCustomer = false;
 
     // Step 1: Create or get the customer account
     try {
@@ -77,7 +78,7 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServi
         if (accountId) {
             console.log(`✅ Got accountId from creation response: ${accountId}`);
         }
-        createdNewUser = true; // Mark as newly created
+        wasNewCustomer = true; // Creation successful, so user is new
     } catch (err) {
         const errorMessage = err.response?.data?.errorMessage || '';
         const alreadyExists =
@@ -90,14 +91,14 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServi
         }
     }
 
-    // Step 2: If no accountId yet (meaning user existed), try search with retries
+    // Step 2: If accountId is still missing (i.e., user existed), search with retries
     if (!accountId) {
         accountId = await getJiraAccountIdByEmail(email, jiraDomain, headers, 3);
     }
 
     if (!accountId) {
-        console.warn(`⚠️ Still no accountId for ${email}, skipping ticket creation.`);
-        return false; // Cannot proceed without ID
+        console.warn(`⚠️ Still no accountId for ${email}, skipping invite.`);
+        return { accountId: null, wasNewCustomer: false };
     }
 
     // Step 3: Add to service desk (triggers invite/welcome email)
@@ -108,6 +109,7 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServi
             headers,
             `Adding customer ${email} to JSM desk ${jsmServiceDeskId}`
         );
+        console.log(`✅ Customer added to JSM desk ${jsmServiceDeskId}.`);
         console.log(`📨 Invite email triggered for ${email}`);
     } catch (err) {
         const alreadyAdded = err.response?.status === 400 ||
@@ -118,7 +120,7 @@ async function checkAndInviteCustomer(email, name, headers, jiraDomain, jsmServi
             throw err;
         }
     }
-    return createdNewUser;
+    return { accountId, wasNewCustomer };
 }
 
 /**
@@ -137,18 +139,13 @@ End Date: ${endDate}
 }
 
 /**
- * Create JSM Customer Request (uses JSM API)
+ * Create JSM Support Request
  */
-async function createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, headers, reporterObject, customerData, startDate, endDate, wasNewCustomer) {
+async function createJsmSupportTicket(summary, jsmProjectKey, jiraDomain, headers, customerData, startDate, endDate, wasNewCustomer) {
     const sourceFieldPayload = [SOURCE_VALUE]; 
     
-    // Determine the Labels array based on whether the customer was newly created.
-    const labels = [SOURCE_VALUE];
-    if (wasNewCustomer) {
-        labels.push('NewCustomer'); // Label for automation trigger
-    } else {
-        labels.push('ExistingCustomer');
-    }
+    // Determine the label for Customer Type: 'New Customer' or 'Existing Customer'
+    const customerTypeLabel = wasNewCustomer ? ['New Customer'] : ['Existing Customer'];
 
     // The fields below are CONFIRMED available in the createmeta response.
     const requestFields = {
@@ -156,8 +153,8 @@ async function createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, head
         "description": buildCustomerDescriptionDoc(customerData, startDate, endDate),
         [FIELD_START_DATE]: startDate,
         "duedate": endDate,
-        [FIELD_SOURCE]: sourceFieldPayload, // Work Source field set to ['Stripe']
-        "labels": labels // Final labels array
+        [FIELD_SOURCE]: sourceFieldPayload,
+        [FIELD_CUSTOMER_TYPE]: customerTypeLabel 
     };
 
     return jiraPost(
@@ -225,21 +222,21 @@ async function processCheckoutSession(session) {
         let accountId = null;
 
         if (jsmProjectKey && jsmServiceDeskId) {
-            wasNewCustomer = await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain, jsmServiceDeskId);
+            const result = await checkAndInviteCustomer(customerEmail, customerName, headers, jiraDomain, jsmServiceDeskId);
+            
+            if (result && result.accountId) {
+                accountId = result.accountId;
+                wasNewCustomer = result.wasNewCustomer;
+                console.log(wasNewCustomer ? "🌟 New customer detected." : "👤 Existing customer detected.");
+            } else {
+                console.warn("⚠️ Could not determine customer type — skipping customer type label.");
+            }
         } else {
             console.warn("⚠️ Skipping JSM onboarding — missing jsmProjectKey or jsmServiceDeskId.");
         }
-        
-        // After onboarding attempt, try to resolve accountId one more time if needed
-        if (typeof wasNewCustomer === 'string') {
-             accountId = wasNewCustomer; // AccountId was returned from checkAndInviteCustomer (should only happen if created)
-             wasNewCustomer = true;
-        } else if (wasNewCustomer === false) {
-             accountId = await getJiraAccountIdByEmail(customerEmail, jiraDomain, headers, 1); // Try one quick search if user existed
-        }
 
-        // 2️⃣ Reporter: prefer accountId, fallback to email
-        const reporterObject = accountId ? { accountId } : { emailAddress: customerEmail };
+        // 2️⃣ Reporter: The JSM API handles attribution via raiseOnBehalfOf.
+        const reporterObject = { emailAddress: customerEmail }; 
 
         // 3️⃣ Create Customer Request (uses JSM API)
         if (jsmProjectKey) {
