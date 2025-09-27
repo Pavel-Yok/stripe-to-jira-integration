@@ -32,3 +32,6 @@ substitutions:
   _JIRA_JSM_REQUEST_TYPE_ID: "47"
 
 options:
+  # FIX: CLOUD_LOGGING_ONLY MUST be inside the options block to be recognized
+  logging: CLOUD_LOGGING_ONLY 
+  machineType: 'E2_MEDIUM'
