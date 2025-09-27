@@ -43,3 +43,5 @@ substitutions:
 
 options:
   logging: CLOUD_LOGGING_ONLY
+  # Cosmetic change to force deployment:
+  machineType: 'E2_MEDIUM'
