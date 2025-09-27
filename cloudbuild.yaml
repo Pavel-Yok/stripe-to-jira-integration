@@ -10,6 +10,7 @@ steps:
           --entry-point=stripetojira \
           --allow-unauthenticated \
           --region=europe-west2 \
+          --update-secrets=STRIPE_SECRET_KEY=stripe-secret-key,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret,JIRA_EMAIL=jira-email,JIRA_API_TOKEN=jira-api-token,JIRA_DOMAIN=jira-domain \
           --set-env-vars=JIRA_JSM_SERVICE_DESK_ID=${_JIRA_JSM_SERVICE_DESK_ID},JIRA_JSM_PROJECT_KEY=${_JIRA_JSM_PROJECT_KEY},JIRA_JSM_REQUEST_TYPE_ID=${_JIRA_JSM_REQUEST_TYPE_ID}
   
   - name: 'gcr.io/cloud-builders/gcloud'
@@ -24,15 +25,15 @@ steps:
 
 availableSecrets:
   secretManager:
-  - versionName: projects/jira-stripe-integration/secrets/STRIPE_SECRET_KEY/versions/latest
+  - versionName: projects/jira-stripe-integration/secrets/stripe-secret-key/versions/latest
     env: STRIPE_SECRET_KEY
-  - versionName: projects/jira-stripe-integration/secrets/STRIPE_WEBHOOK_SECRET/versions/latest
+  - versionName: projects/jira-stripe-integration/secrets/stripe-webhook-secret/versions/latest
     env: STRIPE_WEBHOOK_SECRET
-  - versionName: projects/jira-stripe-integration/secrets/JIRA_EMAIL/versions/latest
+  - versionName: projects/jira-stripe-integration/secrets/jira-email/versions/latest
     env: JIRA_EMAIL
-  - versionName: projects/jira-stripe-integration/secrets/JIRA_API_TOKEN/versions/latest
+  - versionName: projects/jira-stripe-integration/secrets/jira-api-token/versions/latest
     env: JIRA_API_TOKEN
-  - versionName: projects/jira-stripe-integration/secrets/JIRA_DOMAIN/versions/latest
+  - versionName: projects/jira-stripe-integration/secrets/jira-domain/versions/latest
     env: JIRA_DOMAIN
   
 substitutions:
