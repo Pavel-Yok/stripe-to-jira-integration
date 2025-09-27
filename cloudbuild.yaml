@@ -23,19 +23,6 @@ steps:
           --role="roles/run.invoker" \
           --region=europe-west2
 
-availableSecrets:
-  secretManager:
-  - versionName: projects/jira-stripe-integration/secrets/stripe-secret-key/versions/latest
-    env: STRIPE_SECRET_KEY
-  - versionName: projects/jira-stripe-integration/secrets/stripe-webhook-secret/versions/latest
-    env: STRIPE_WEBHOOK_SECRET
-  - versionName: projects/jira-stripe-integration/secrets/jira-email/versions/latest
-    env: JIRA_EMAIL
-  - versionName: projects/jira-stripe-integration/secrets/jira-api-token/versions/latest
-    env: JIRA_API_TOKEN
-  - versionName: projects/jira-stripe-integration/secrets/jira-domain/versions/latest
-    env: JIRA_DOMAIN
-  
 substitutions:
   _JIRA_JSM_SERVICE_DESK_ID: "6"
   _JIRA_JSM_PROJECT_KEY: "YOK"
