@@ -144,8 +144,8 @@ End Date: ${endDate}
 async function createJsmCustomerRequest(summary, jsmProjectKey, jiraDomain, headers, customerData, startDate, endDate, wasNewCustomer) {
     const sourceFieldPayload = [SOURCE_VALUE]; 
     
-    // Determine the label for Customer Type: 'New Customer' or 'Existing Customer'
-    const customerTypeLabel = wasNewCustomer ? ['New Customer'] : ['Existing Customer'];
+    // Determine the label for Customer Type: 'New-Customer' or 'Existing_Customer'
+    const customerTypeLabel = wasNewCustomer ? ['New-Customer'] : ['Existing-Customer'];
 
     // The fields below are CONFIRMED available in the createmeta response.
     const requestFields = {
